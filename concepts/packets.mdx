@@ -1,0 +1,150 @@
+---
+title: "The Loop Wire Contract: Packets, Kinds, and Values"
+sidebarTitle: "Packets"
+description: "Loop's wire contract defines three packet kinds — value, frame, and data — that every component on the pipeline speaks. Learn how packets flow and what each kind carries."
+---
+
+Every signal that moves through a Loop pipeline is a **packet** — a plain TypeScript object with a `kind` discriminant that tells every stage on the wire what shape to expect. The wire contract is intentionally narrow: there are exactly three kinds, and nothing else is allowed to cross. This constraint is what lets `loop.pipe()` validate adjacent stages at wiring time before your code ever runs.
+
+## The packet type
+
+```typescript types.ts
+type Vec = { x: number; y: number; z?: number };
+
+type Packet =
+  | { kind: "value"; value: number | Vec }
+  | { kind: "frame"; frame: ImageData }
+  | { kind: "data"; type: string; value: unknown };
+```
+
+Every source's `read()` function returns a `Packet | null`, every transform's `process()` accepts and returns a `Packet`, and every sink's `render()` receives a `Packet`. The same type flows end-to-end with no intermediate translation.
+
+## The three kinds
+
+<CardGroup cols={3}>
+  <Card title="value" icon="wave-sine">
+    A continuous numeric signal — a raw scalar or a directional vector. Used for anything that changes smoothly over time.
+  </Card>
+  <Card title="frame" icon="image">
+    A pixel buffer wrapped in the browser's native `ImageData` type. Used for camera feeds, canvas snapshots, and video processing.
+  </Card>
+  <Card title="data" icon="tag">
+    A tagged envelope for text, JSON objects, and discrete events. The `type` string lets downstream stages identify what `value` contains.
+  </Card>
+</CardGroup>
+
+### `value` — scalars and vectors
+
+A `value` packet carries either a plain `number` or a `Vec` object. Use `value` whenever your signal is continuous and can be meaningfully normalized:
+
+```typescript
+// Scalar: a slider at 75%
+const sliderPacket: Packet = { kind: "value", value: 0.75 };
+
+// Vec: a D-pad pushed right and slightly down
+const dpadPacket: Packet = { kind: "value", value: { x: 1, y: 0.5 } };
+
+// Vec with Z-axis for 3-D inputs (e.g. accelerometer)
+const tiltPacket: Packet = { kind: "value", value: { x: 0.2, y: -0.4, z: 0.9 } };
+```
+
+Loop ships two normalization helpers you can call in your own sources and transforms:
+
+```typescript types.ts
+// Clamp a scalar to [0, 1] — for sliders, triggers, mic levels
+function normalizeScalar(v: number): number {
+  return Math.max(0, Math.min(1, v));
+}
+
+// Clamp a scalar to [−1, 1] — for D-pad axes, joystick axes
+function normalizeBipolar(v: number): number {
+  return Math.max(-1, Math.min(1, v));
+}
+```
+
+The convention is:
+
+| Signal type | Range | Examples |
+|---|---|---|
+| Continuous scalar | `0–1` | slider position, trigger pressure, mic level |
+| Directional axis | `−1–1` | D-pad axis, joystick axis, gyroscope |
+| Vec per-axis | `−1–1` per axis | D-pad, analog stick |
+
+### `frame` — pixel buffers
+
+A `frame` packet wraps the browser's `ImageData` type, which stores raw RGBA pixel data at a fixed resolution. Use `frame` for anything that produces or consumes a pixel grid:
+
+```typescript
+// Reading a canvas into a frame packet
+const ctx = canvas.getContext("2d")!;
+const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+const framePacket: Packet = { kind: "frame", frame: imageData };
+```
+
+Frame packets are resolution-independent from the pipeline's perspective — the receiving sink is responsible for scaling or fitting the image to its display target.
+
+<Note>
+  `frame` packets cannot be relayed over the cross-device transport in the current release. BroadcastChannel, WebSocket, and memory transports carry `value` and `data` packets only. `frame` relay via `VideoFrame` is planned for a future version.
+</Note>
+
+### `data` — tagged text and events
+
+A `data` packet carries any structured value alongside a `type` string that names what it is. This keeps the wire typeable and lets stages downstream filter by `type` without inspecting the shape of `value`:
+
+```typescript
+// Keyboard text — what loop.input("keyboard") emits
+const textPacket: Packet = { kind: "data", type: "text", value: "hello" };
+
+// A discrete UI event
+const eventPacket: Packet = { kind: "data", type: "button-press", value: { id: "submit" } };
+
+// A JSON payload from a fetch transform
+const jsonPacket: Packet = { kind: "data", type: "weather", value: { temp: 22, unit: "C" } };
+```
+
+When you declare a stage with `dataType: "text"`, Loop's pipe validator checks that adjacent stages share the same `dataType` string and throws a `"Data type mismatch"` error at wiring time if they don't.
+
+## Why the contract matters
+
+The narrow wire contract is what gives `loop.pipe()` enough information to validate your pipeline before a single frame renders. When you call `loop.pipe(src, transform, sink)`, Loop walks each adjacent pair and calls `checkAdjacent()`:
+
+```typescript pipe.ts
+// Simplified from src/pipe.ts
+for (let i = 0; i < stages.length - 1; i++) {
+  checkAdjacent(stages[i], stages[i + 1]);
+}
+```
+
+That check confirms:
+1. The upstream stage declares `emits` and the downstream stage declares `accepts`.
+2. The emitted kind appears in the accepted kinds list — otherwise it throws `"Type mismatch"`.
+3. If both stages have a `dataType` string and the kind is `"data"`, the strings must match — otherwise it throws `"Data type mismatch"`.
+
+You find out about wiring errors at the `loop.pipe()` call site — not buried in a runtime stack trace three frames into your animation loop.
+
+<Accordion title="Full checkAdjacent logic from source">
+```typescript component.ts
+export function checkAdjacent(a: Stage, b: Stage): void {
+  const aEmits = stageEmits(a);
+  const bAccepts = stageAccepts(b);
+
+  if (aEmits === undefined) {
+    throw new Error(`Stage "${a.name}" does not emit`);
+  }
+  if (bAccepts.length === 0) {
+    throw new Error(`Stage "${b.name}" does not accept`);
+  }
+  if (!bAccepts.includes(aEmits)) {
+    throw new Error(
+      `Type mismatch: "${a.name}" emits "${aEmits}" but "${b.name}" accepts [${bAccepts.join(", ")}]`,
+    );
+  }
+
+  if (aEmits === "data" && a.dataType && b.dataType && a.dataType !== b.dataType) {
+    throw new Error(
+      `Data type mismatch: "${a.name}" emits data:"${a.dataType}" but "${b.name}" expects data:"${b.dataType}"`,
+    );
+  }
+}
+```
+</Accordion>

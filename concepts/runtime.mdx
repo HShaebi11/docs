@@ -1,0 +1,138 @@
+---
+title: "The Loop Runtime: RAF Tick Loop and Scheduling"
+sidebarTitle: "Runtime"
+description: "Loop's runtime drives all pipelines and handles on a single requestAnimationFrame tick loop. Learn how it starts, stops, and how to hook into each frame."
+---
+
+Loop's runtime is a single `requestAnimationFrame` loop that coordinates everything — handle sampling, pipeline execution, and user-registered tick callbacks — in a fixed order every frame. You never start it explicitly: it wakes up automatically the moment you register a pipeline or a tick function, and it keeps running as long as there is work to do.
+
+## How each frame executes
+
+Every RAF callback in the Loop runtime does three things, in this exact order:
+
+<Steps>
+  <Step title="Sample all handles">
+    Every active `Handle` that has a sampler function (D-pad, sliders, relay subscriptions) calls its sampler and updates its internal value. If the value changed, any `on("change")` listeners fire synchronously and all `bind()` callbacks run.
+  </Step>
+  <Step title="Run all pipelines">
+    Every registered pipeline calls `runPipeline(stages)`. The source's `read()` runs first. If it returns `null`, the pipeline skips the rest of its stages for this frame. Otherwise the packet flows through each transform's `process()` and arrives at the sink's `render()`.
+  </Step>
+  <Step title="Fire all tick callbacks">
+    Every function registered with `loop.tick()` runs in registration order. This is where you put per-frame logic that isn't captured by a pipeline — position accumulation, canvas draws, Three.js renders.
+  </Step>
+</Steps>
+
+This ordering means that by the time your `loop.tick()` callback runs, all handle values are already up to date for the current frame. Reading `dpad.value` inside a tick callback always returns the freshest sample.
+
+## `loop.tick(fn)`
+
+Register a function to run once per animation frame. `loop.tick()` returns an unsubscribe function — call it to remove the callback from the runtime:
+
+```typescript app.ts
+import loop from "@theinterfaces-lab/loop";
+
+const dpad = loop.input("dpad");
+const el = document.getElementById("square")!;
+
+let posX = 0;
+let posY = 0;
+const speed = 4;
+
+const stop = loop.tick(() => {
+  posX += dpad.value.x * speed;
+  posY += dpad.value.y * speed;
+  el.style.transform = `translate(${posX}px, ${posY}px)`;
+});
+
+// Remove the tick callback when it's no longer needed
+stop();
+```
+
+Registering a tick callback is enough on its own to start the runtime — you don't need an active pipeline.
+
+<Tip>
+  Put all stateful accumulation (position, velocity, running totals) inside `loop.tick()` callbacks, not inside sink `render()` functions. A `render()` function is called by the pipeline machinery and should only apply a packet value to a target — it has no guarantee about call order relative to other pipelines or tick functions.
+</Tip>
+
+## Auto-start behavior
+
+The runtime starts itself automatically whenever any of the following happens:
+
+- `pipeline.start()` is called
+- `loop.tick(fn)` is called
+- `handle.bind()` is called (binding registers the handle with the runtime)
+
+The runtime keeps running as long as at least one pipeline, tick function, or registered handle is active. It does **not** stop itself automatically — use `pipeline.stop()` or the unsubscribe functions returned by `loop.tick()` and `handle.bind()` to remove work from the runtime.
+
+## Node.js compatibility
+
+Loop detects whether `requestAnimationFrame` is available and falls back gracefully when it isn't — for example, in a Node.js test environment or a server-side script:
+
+```typescript runtime.ts
+function scheduleFrame(cb: FrameRequestCallback): number {
+  if (typeof requestAnimationFrame !== "undefined") {
+    return requestAnimationFrame(cb);
+  }
+  // Falls back to setTimeout with a ~16ms delay (≈60fps)
+  return setTimeout(() => cb(performance?.now() ?? Date.now()), 16) as unknown as number;
+}
+```
+
+The fallback uses `setTimeout(16)` to approximate 60 fps. The API surface is identical — `loop.tick()`, pipelines, and handles all work the same way in both environments.
+
+## Internal order: what the runtime tick does
+
+For reference, here is the complete tick sequence as implemented in the runtime:
+
+```typescript runtime.ts
+private tick = (): void => {
+  // 1. Sample all handles (updates values, fires change listeners)
+  for (const handle of this.handles) {
+    handle._tick();
+  }
+
+  // 2. Run all registered pipelines
+  for (const pipeline of this.pipelines) {
+    runPipeline(pipeline.stages);
+  }
+
+  // 3. Fire all user-registered tick callbacks
+  for (const fn of this.tickFns) {
+    fn();
+  }
+
+  // Schedule the next frame
+  this.rafId = scheduleFrame(this.tick);
+};
+```
+
+Pipelines and tick functions share the same frame budget. Avoid long-running synchronous work inside either — anything that takes more than a frame budget (~16ms at 60fps) will visibly drop frames.
+
+## Managing the runtime lifecycle
+
+<CardGroup cols={2}>
+  <Card title="Start a pipeline" icon="play">
+    ```typescript
+    const pipeline = loop.pipe(src, snk);
+    pipeline.start(); // runtime auto-starts
+    ```
+  </Card>
+  <Card title="Stop a pipeline" icon="stop">
+    ```typescript
+    pipeline.stop(); // removed from runtime
+    // runtime keeps running for other pipelines
+    ```
+  </Card>
+  <Card title="Add a tick callback" icon="clock">
+    ```typescript
+    const stop = loop.tick(() => {
+      // runs every frame
+    });
+    ```
+  </Card>
+  <Card title="Remove a tick callback" icon="xmark">
+    ```typescript
+    stop(); // unsubscribes the tick callback
+    ```
+  </Card>
+</CardGroup>

@@ -1,0 +1,325 @@
+---
+title: "Loop TypeScript Types Reference"
+sidebarTitle: "Types"
+description: "Complete TypeScript type reference for Loop — Packet, Vec, Kind, Handle, Stage, Pipeline, SliderBundle, Transport, TransportStatus, and component definition interfaces."
+---
+
+Loop ships a focused set of TypeScript types that form the contract between every part of the library. All types listed here are exported from `@theinterfaces-lab/loop` and are fully available in any TypeScript project. If you use Loop via a `<script type="module">` tag without a build step, JSDoc inference provides equivalent editor support in JavaScript.
+
+---
+
+## Packet Types
+
+Packets are the values that flow through every Loop pipeline. There are exactly three packet shapes — `value`, `frame`, and `data` — and all three are unified under the `Packet` union type.
+
+```typescript packets.ts
+type Vec = { x: number; y: number; z?: number };
+
+type Packet =
+  | { kind: "value"; value: number | Vec }
+  | { kind: "frame"; frame: ImageData }
+  | { kind: "data"; type: string; value: unknown };
+
+type Kind = "value" | "frame" | "data";
+```
+
+<Accordion title="Packet kind details">
+
+**`value`** — Carries a scalar `number` or a 2D/3D vector `Vec`. Use this for continuous signals: sliders, d-pad positions, sensor readings, or any numeric stream.
+
+**`frame`** — Carries an `ImageData` object representing a single video or canvas frame. Frame packets cannot be sent over the relay transports (serialization is not yet supported).
+
+**`data`** — Carries an arbitrary tagged payload. The `type` string namespaces the payload so that downstream stages can discriminate between different data streams sharing the same pipeline. Useful for events, keystrokes, MIDI messages, or any structured payload that doesn't fit a scalar.
+
+</Accordion>
+
+### `Vec`
+
+A two- or three-dimensional vector. The `z` component is optional — Loop treats a missing `z` as `0` when comparing two `Vec` values for equality.
+
+```typescript vec.ts
+type Vec = {
+  x: number;
+  y: number;
+  z?: number;
+};
+```
+
+### `Kind`
+
+A string literal union that names the three packet shapes. Used throughout Loop to declare what a stage emits or accepts.
+
+```typescript kind.ts
+type Kind = "value" | "frame" | "data";
+```
+
+---
+
+## `Handle<T>`
+
+A reactive reference to a value that updates each animation frame. Handles are returned by `loop.input()`, `loop.getSlidersInput()`, and `room.subscribe()`. Read the current value synchronously, listen for changes, or bind a DOM element to keep it in sync.
+
+```typescript handle.ts
+interface Handle<T = number | Vec> {
+  readonly value: T;
+  on(event: "change", fn: (v: T) => void): () => void;
+  bind(el: Element, apply: (v: T) => void): () => void;
+}
+```
+
+<ResponseField name="value" type="T" required>
+  The current value. Read this synchronously at any point. For handles backed by a sampler (like a built-in input), the value updates every RAF tick before any `"change"` listeners fire.
+</ResponseField>
+
+<ResponseField name="on(event, fn)" type="() => void">
+  Subscribes to value changes. `event` must be `"change"`. The callback receives the new value `v`. Returns an unsubscribe function — call it to remove the listener.
+</ResponseField>
+
+<ResponseField name="bind(el, apply)" type="() => void">
+  Registers a DOM binding. Loop calls `apply(value, el)` immediately and then again each frame whenever the value changes. Returns an unsubscribe function. Calling `bind` implicitly registers the handle with the RAF runtime so it ticks even without a pipeline.
+</ResponseField>
+
+```typescript handle-usage.ts
+import loop from "@theinterfaces-lab/loop";
+
+const keyboard = loop.input("keyboard") as Handle<string>;
+
+// Read synchronously
+console.log(keyboard.value);
+
+// React to changes
+const unsub = keyboard.on("change", (key) => {
+  console.log("Key changed:", key);
+});
+
+// Bind to a DOM element
+const el = document.querySelector<HTMLElement>("#key-display")!;
+keyboard.bind(el, (v, target) => {
+  (target as HTMLElement).textContent = v;
+});
+```
+
+---
+
+## Component Definition Interfaces
+
+When you call `loop.source()`, `loop.transform()`, or `loop.sink()`, you pass one of these definition objects. Loop validates the shapes at wiring time and converts them into internal `Stage` objects.
+
+```typescript component-defs.ts
+interface SourceDef {
+  from: string;
+  emits: Kind;
+  dataType?: string;
+  read(): Packet | null;
+}
+
+interface TransformDef {
+  accepts: Kind | Kind[];
+  emits: Kind;
+  dataType?: string;
+  process(input: Packet): Packet;
+}
+
+interface SinkDef {
+  to: string;
+  accepts: Kind | Kind[];
+  dataType?: string;
+  render(input: Packet): void;
+}
+
+type ComponentDef = SourceDef | TransformDef | SinkDef;
+```
+
+<Accordion title="SourceDef field descriptions">
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `from` | `string` | ✅ | A name identifying this source. Used in error messages and debug tooling. |
+| `emits` | `Kind` | ✅ | The packet kind this source produces each frame. |
+| `dataType` | `string` | — | When `emits` is `"data"`, narrows the tag for type-checking against downstream stages. |
+| `read` | `() => Packet \| null` | ✅ | Called every RAF tick. Return a `Packet` to push downstream, or `null` to skip this frame. |
+
+</Accordion>
+
+<Accordion title="TransformDef field descriptions">
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `accepts` | `Kind \| Kind[]` | ✅ | The packet kind(s) this transform receives. Pass an array to accept multiple kinds. |
+| `emits` | `Kind` | ✅ | The packet kind this transform produces after processing. |
+| `dataType` | `string` | — | Narrows the `data` tag for type-checking against adjacent stages. |
+| `process` | `(input: Packet) => Packet` | ✅ | Transforms the incoming packet into a new packet each frame. |
+
+</Accordion>
+
+<Accordion title="SinkDef field descriptions">
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `to` | `string` | ✅ | A name identifying this sink. Used in error messages and debug tooling. |
+| `accepts` | `Kind \| Kind[]` | ✅ | The packet kind(s) this sink receives. |
+| `dataType` | `string` | — | When `accepts` is `"data"`, narrows the expected tag. |
+| `render` | `(input: Packet) => void` | ✅ | Called every frame with the incoming packet. Perform side effects here — write to the DOM, draw to a canvas, fire an event. |
+
+</Accordion>
+
+---
+
+## `Stage`
+
+The internal representation of a pipeline step. You do not construct `Stage` objects directly — `loop.source()`, `loop.transform()`, `loop.sink()`, and `loop.component()` each return one. `Stage` is also the return type of `room.outbound()` and `room.inbound()`.
+
+```typescript stage.ts
+interface Stage {
+  role: "source" | "transform" | "sink";
+  name: string;
+  emits?: Kind;
+  accepts?: Kind | Kind[];
+  dataType?: string;
+  read?: () => Packet | null;
+  process?: (input: Packet) => Packet;
+  render?: (input: Packet) => void;
+}
+```
+
+<Note>
+  Loop validates that adjacent stages in a `pipe()` call are type-compatible — the upstream stage's `emits` must appear in the downstream stage's `accepts`. If there is a mismatch, `loop.pipe()` throws at call time rather than silently failing at runtime.
+</Note>
+
+---
+
+## `Pipeline`
+
+The object returned by `loop.pipe(...stages)`. Call `start()` to register the pipeline with the RAF runtime and `stop()` to remove it.
+
+```typescript pipeline.ts
+interface Pipeline {
+  stages: Stage[];
+  start(): void;
+  stop(): void;
+}
+```
+
+<ResponseField name="stages" type="Stage[]">
+  The ordered array of stages in this pipeline, from source to sink.
+</ResponseField>
+
+<ResponseField name="start()" type="void">
+  Registers this pipeline with Loop's RAF runtime. From this point on, the pipeline runs once per animation frame: the source reads a packet, each transform processes it, and the sink renders it.
+</ResponseField>
+
+<ResponseField name="stop()" type="void">
+  Removes this pipeline from the RAF runtime. The pipeline stops executing immediately; the next animation frame will not call any of its stages.
+</ResponseField>
+
+```typescript pipeline-lifecycle.ts
+import loop from "@theinterfaces-lab/loop";
+
+const src = loop.source({
+  from: "counter",
+  emits: "value",
+  read() {
+    return { kind: "value", value: Date.now() };
+  },
+});
+
+const sink = loop.sink({
+  to: "display",
+  accepts: "value",
+  render(packet) {
+    if (packet.kind === "value" && typeof packet.value === "number") {
+      document.title = String(packet.value);
+    }
+  },
+});
+
+const pipeline = loop.pipe(src, sink);
+
+pipeline.start(); // begins running every frame
+// ... later:
+pipeline.stop();  // stops running
+```
+
+---
+
+## `SliderBundle`
+
+The object returned by `loop.getSlidersInput()`. Provides three independent `Handle<number>` values driven by a connected gamepad, MIDI controller, or on-screen slider UI.
+
+```typescript slider-bundle.ts
+interface SliderBundle {
+  x: Handle<number>;
+  y: Handle<number>;
+  rotation: Handle<number>;
+}
+```
+
+<ResponseField name="x" type="Handle<number>">
+  Horizontal position or primary axis. Normalized to the range `[0, 1]`.
+</ResponseField>
+
+<ResponseField name="y" type="Handle<number>">
+  Vertical position or secondary axis. Normalized to the range `[0, 1]`.
+</ResponseField>
+
+<ResponseField name="rotation" type="Handle<number>">
+  Rotational value or tertiary axis. Normalized to the range `[0, 1]`.
+</ResponseField>
+
+```typescript sliders-usage.ts
+import loop from "@theinterfaces-lab/loop";
+
+const sliders = loop.getSlidersInput();
+
+sliders.x.on("change", (v) => console.log("X:", v));
+sliders.y.on("change", (v) => console.log("Y:", v));
+sliders.rotation.on("change", (v) => console.log("Rotation:", v));
+```
+
+---
+
+## `Transport` and `TransportStatus`
+
+These types define the contract for all relay transport implementations. See the [Transports reference](/api/transports) for full documentation of the three built-in implementations.
+
+```typescript transport-types.ts
+type TransportStatus =
+  | "idle"
+  | "connecting"
+  | "connected"
+  | "disconnected"
+  | "error";
+
+interface Transport {
+  readonly status: TransportStatus;
+  connect(): Promise<void>;
+  disconnect(): void;
+  send(packet: Packet): void;
+  onPacket(fn: (packet: Packet) => void): () => void;
+  onStatus(fn: (status: TransportStatus) => void): () => void;
+}
+```
+
+<ResponseField name="status" type="TransportStatus">
+  The current connection state. `"idle"` is the initial value after construction. Transitions are one-directional: `idle → connecting → connected → disconnected` (or `→ error` on failure).
+</ResponseField>
+
+<ResponseField name="connect()" type="Promise<void>">
+  Opens the underlying channel. Resolves when the transport reaches `"connected"`. Rejects (and sets status to `"error"`) if the connection attempt fails.
+</ResponseField>
+
+<ResponseField name="disconnect()" type="void">
+  Closes the underlying channel and sets status to `"disconnected"`. Safe to call from any state.
+</ResponseField>
+
+<ResponseField name="send(packet)" type="void">
+  Serializes and sends a packet to all peers in the room. No-ops silently when the transport is not `"connected"`. Throws if `packet.kind === "frame"`.
+</ResponseField>
+
+<ResponseField name="onPacket(fn)" type="() => void">
+  Registers a callback invoked whenever a packet arrives from a peer. Returns an unsubscribe function.
+</ResponseField>
+
+<ResponseField name="onStatus(fn)" type="() => void">
+  Registers a callback invoked whenever the transport status changes. Returns an unsubscribe function.
+</ResponseField>

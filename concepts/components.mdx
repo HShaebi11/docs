@@ -1,0 +1,217 @@
+---
+title: "Loop Components: Sources, Transforms, and Sinks"
+sidebarTitle: "Components"
+description: "Every stage in a Loop pipeline is a component — a source reads data, a transform processes it, and a sink renders the result. All three share the same shape."
+---
+
+Loop has one primitive: the **component**. A component is a plain object that declares which packet kind it speaks and provides exactly one method — `read`, `process`, or `render` — depending on its role in the pipeline. Sources produce packets, transforms reshape them, and sinks consume them. All three are created by the same factory functions and all three return a `Stage` object that `loop.pipe()` understands.
+
+## The three factories
+
+### `loop.source(def)` — produce packets
+
+A source is the first stage of any pipeline. It declares `emits` (which packet kind it produces) and provides a `read()` function that Loop calls once per animation frame. Return `null` from `read()` to signal that there is no new data this frame — Loop will skip the rest of the pipeline for that tick.
+
+```typescript app.ts
+const keyboardSrc = loop.source({
+  from: "keyboard",          // human-readable name, used in error messages
+  emits: "data",
+  dataType: "text",          // optional: narrows the data kind for pipe validation
+  read() {
+    const handle = loop.input("keyboard");
+    return { kind: "data", type: "text", value: handle.value };
+  },
+});
+```
+
+<ParamField body="from" type="string" required>
+  A human-readable name for this source. Appears in type-mismatch error messages.
+</ParamField>
+
+<ParamField body="emits" type='"value" | "frame" | "data"' required>
+  The packet kind this source produces. Must match the `accepts` of the next stage.
+</ParamField>
+
+<ParamField body="dataType" type="string">
+  Optional sub-type string for `data` packets (e.g. `"text"`, `"event"`). When set, `loop.pipe()` checks that adjacent stages share the same string.
+</ParamField>
+
+<ParamField body="read" type="() => Packet | null" required>
+  Called once per RAF frame. Return a packet to pass it downstream, or `null` to skip this frame.
+</ParamField>
+
+### `loop.transform(def)` — reshape packets
+
+A transform sits between a source and a sink. It declares both `accepts` and `emits`, and its `process()` function receives a packet and must return a packet. Transforms can change the packet's content, its `kind`, or both.
+
+```typescript app.ts
+const upperTransform = loop.transform({
+  accepts: "data",
+  emits: "data",
+  dataType: "text",
+  process(packet) {
+    if (packet.kind !== "data") return packet;
+    return { kind: "data", type: "text", value: String(packet.value).toUpperCase() };
+  },
+});
+```
+
+<ParamField body="accepts" type='"value" | "frame" | "data" | Kind[]' required>
+  The packet kind (or array of kinds) this transform can receive. Pass an array to accept multiple kinds.
+</ParamField>
+
+<ParamField body="emits" type='"value" | "frame" | "data"' required>
+  The packet kind this transform produces after processing.
+</ParamField>
+
+<ParamField body="dataType" type="string">
+  Optional sub-type string for `data` packets. Validated against adjacent stages at wiring time.
+</ParamField>
+
+<ParamField body="process" type="(input: Packet) => Packet" required>
+  Called with the incoming packet each frame. Must return a packet (never `null`).
+</ParamField>
+
+### `loop.sink(def)` — consume packets
+
+A sink is the last stage of a pipeline. It declares `accepts` and provides a `render()` function that Loop calls each frame with the final packet. The sink is where you update the DOM, draw to a canvas, push to an audio node, or write to a hardware device.
+
+```typescript app.ts
+const domSink = loop.sink({
+  to: "mirror",              // human-readable name
+  accepts: "data",
+  dataType: "text",
+  render(packet) {
+    if (packet.kind !== "data") return;
+    el.textContent = String(packet.value);
+  },
+});
+```
+
+<ParamField body="to" type="string" required>
+  A human-readable name for this sink. Appears in type-mismatch error messages.
+</ParamField>
+
+<ParamField body="accepts" type='"value" | "frame" | "data" | Kind[]' required>
+  The packet kind (or array of kinds) this sink can receive.
+</ParamField>
+
+<ParamField body="dataType" type="string">
+  Optional sub-type string for `data` packets. Validated at wiring time.
+</ParamField>
+
+<ParamField body="render" type="(input: Packet) => void" required>
+  Called each frame with the incoming packet. Return value is ignored.
+</ParamField>
+
+## The unified factory: `loop.component(def)`
+
+`loop.component()` inspects the shape of `def` and dispatches to the correct factory automatically. Pass it any component definition and it returns the matching `Stage`. This is useful when you want to write a factory that can produce any role without switching on role names yourself.
+
+```typescript app.ts
+// loop.component() dispatches based on which method is present:
+// has "read"    → loop.source()
+// has "process" → loop.transform()
+// has "render"  → loop.sink()
+
+const stage = loop.component({
+  from: "keyboard",
+  emits: "data",
+  dataType: "text",
+  read() {
+    return { kind: "data", type: "text", value: loop.input("keyboard").value };
+  },
+});
+// stage.role === "source"
+```
+
+The dispatch logic is a straight property check — the first matching key wins:
+
+```typescript component.ts
+export function component(def: ComponentDef): Stage {
+  if ("read" in def) return source(def as SourceDef);
+  if ("process" in def) return transform(def as TransformDef);
+  if ("render" in def) return sink(def as SinkDef);
+  throw new Error("component def must have read, process, or render");
+}
+```
+
+## A complete pipeline
+
+Below is the full keyboard → uppercase → DOM pipeline from the live-text example, showing all three factories together:
+
+```typescript app.ts
+import loop from "@theinterfaces-lab/loop";
+
+const el = document.getElementById("output")!;
+const keyboard = loop.input("keyboard");
+
+const src = loop.source({
+  from: "keyboard",
+  emits: "data",
+  dataType: "text",
+  read: () => ({ kind: "data", type: "text", value: keyboard.value }),
+});
+
+const upper = loop.transform({
+  accepts: "data",
+  emits: "data",
+  dataType: "text",
+  process: (p) => ({
+    kind: "data",
+    type: "text",
+    value: String(p.kind === "data" ? p.value : "").toUpperCase(),
+  }),
+});
+
+const snk = loop.sink({
+  to: "output",
+  accepts: "data",
+  dataType: "text",
+  render: (p) => {
+    if (p.kind === "data") el.textContent = String(p.value);
+  },
+});
+
+loop.pipe(src, upper, snk).start();
+```
+
+## Type checking at wiring time
+
+When you call `loop.pipe()`, Loop validates every adjacent pair before the pipeline registers with the runtime. A kind mismatch throws immediately:
+
+```typescript
+// Throws: Type mismatch: "keyboard" emits "data" but "dom-value-sink" accepts [value]
+loop.pipe(
+  loop.source({ from: "keyboard", emits: "data", read: () => null }),
+  loop.sink({ to: "dom-value-sink", accepts: "value", render: () => {} }),
+);
+```
+
+A `dataType` mismatch on adjacent `data` stages also throws at wiring time:
+
+```typescript
+// Throws: Data type mismatch: "src" emits data:"text" but "snk" expects data:"event"
+loop.pipe(
+  loop.source({ from: "src", emits: "data", dataType: "text", read: () => null }),
+  loop.sink({ to: "snk", accepts: "data", dataType: "event", render: () => {} }),
+);
+```
+
+<Note>
+  All three factories return `Stage` objects. Pass a `Stage` directly to `loop.pipe()` or `loop.connect()` — you never need to unwrap or inspect the stage yourself.
+</Note>
+
+## Accepting multiple kinds
+
+A transform or sink can accept more than one packet kind by passing an array to `accepts`. This is useful for pass-through stages that forward any packet without inspecting it:
+
+```typescript app.ts
+const logger = loop.sink({
+  to: "console-logger",
+  accepts: ["value", "frame", "data"],   // accepts all three kinds
+  render(packet) {
+    console.log("[loop]", packet.kind, packet);
+  },
+});
+```

@@ -1,0 +1,98 @@
+---
+title: "MIDI Control Change Input in Loop"
+sidebarTitle: "MIDI"
+description: "Loop maps MIDI Control Change messages to the sliders bundle automatically. Connect a MIDI controller and the first three CC numbers drive x, y, and rotation handles at 0–1."
+---
+
+Loop integrates MIDI Control Change (CC) messages directly into the sliders bundle. When CC messages arrive from any connected MIDI device, Loop captures the first three distinct CC numbers it sees, sorts them numerically, and maps them to the `x`, `y`, and `rotation` handles. CC values (0–127) are normalized to 0–1 before they reach your code. No manual setup, no event parsing — just call `loop.getSlidersInput()` and MIDI initializes itself.
+
+## How MIDI initializes
+
+MIDI support is bootstrapped automatically the first time you call `loop.getSlidersInput()`. Internally, Loop calls `navigator.requestMIDIAccess()` and registers a `midimessage` listener on every available input port. If access is granted, incoming CC messages begin updating the sliders bundle immediately. If the browser doesn't support MIDI, or access is denied, initialization silently no-ops and the bundle continues to work with gamepad or on-screen fallback sources.
+
+```typescript app.ts
+// MIDI is auto-initialized — just call getSlidersInput()
+const { x, y, rotation } = loop.getSlidersInput();
+
+// Check if MIDI is driving the input
+console.log(loop.getSlidersActiveDevice()); // "midi" when CC messages arrive
+
+loop.tick(() => {
+  // x.value, y.value, rotation.value are all 0–1
+  applyMidiValues(x.value, y.value, rotation.value);
+});
+```
+
+## CC number mapping
+
+Loop discovers CC numbers dynamically rather than requiring you to configure them upfront. The mapping works as follows:
+
+<Steps>
+  <Step title="Receive a CC message">
+    Loop receives a MIDI message with status byte `0xBn` (Control Change on any channel).
+  </Step>
+  <Step title="Record the CC number and value">
+    The CC number and its normalized value (raw ÷ 127) are stored in an internal map, keyed by CC number.
+  </Step>
+  <Step title="Sort and assign">
+    All seen CC numbers are sorted ascending. The lowest-numbered CC maps to `x`, the second to `y`, the third to `rotation`.
+  </Step>
+  <Step title="Update handles">
+    The three slider handles are updated with `_setValue()`, triggering any `change` subscribers and bindings.
+  </Step>
+</Steps>
+
+<Note>
+  The mapping is **sorted by CC number**, not by the order messages arrived. If your controller sends CC 74, CC 71, and CC 7, they map as: CC 7 → `x`, CC 71 → `y`, CC 74 → `rotation`. Wiggle all three controls once to let Loop discover them, then proceed with your session.
+</Note>
+
+## Checking the active device
+
+When at least one CC message arrives, Loop switches the sliders active device to `"midi"`. Use `loop.getSlidersActiveDevice()` to detect this in your UI.
+
+```typescript status.ts
+import loop from "@theinterfaces-lab/loop";
+
+loop.tick(() => {
+  const device = loop.getSlidersActiveDevice();
+  // → "gamepad" | "midi" | "on-screen"
+
+  midiIndicator.classList.toggle("active", device === "midi");
+});
+```
+
+You can also force the active device with `loop.setSlidersActiveDevice("midi")` if you want to lock MIDI input even when a gamepad is connected (normally the gamepad takes priority).
+
+## Value normalization
+
+MIDI CC values are 7-bit integers in the range 0–127. Loop divides each raw value by 127 before writing it to the handle, so all three slider handles always deliver values in the 0–1 range, consistent with the gamepad and on-screen sources.
+
+```
+handle.value = cc_raw_value / 127
+```
+
+## Browser requirements
+
+Loop uses the Web MIDI API (`navigator.requestMIDIAccess()`), which is available in Chromium-based browsers. Firefox requires a third-party extension.
+
+<Warning>
+  MIDI access requires a **secure context** — your page must be served over HTTPS or from `localhost`. Calling `navigator.requestMIDIAccess()` on a plain HTTP origin will be blocked by the browser.
+</Warning>
+
+<Note>
+  If MIDI access is denied by the user, or if the browser does not support `navigator.requestMIDIAccess`, Loop catches the error silently and the sliders bundle falls back to gamepad input or on-screen controls with no intervention required from your code.
+</Note>
+
+## Troubleshooting
+
+<Accordion title="My MIDI controller isn't being detected">
+  Make sure your controller was connected **before** the page loaded, or reconnect it and refresh. The Web MIDI API enumerates ports at access-grant time. Hot-plugging after `requestMIDIAccess()` has already resolved may require a page reload.
+</Accordion>
+
+<Accordion title="The wrong CCs are mapped to x, y, and rotation">
+  MIDI mapping is determined by the first three unique CC numbers Loop receives, sorted ascending. If unused controls on your device send CC messages on startup (a common occurrence with motorized faders or init sequences), those numbers get registered first. To remap cleanly, refresh the page and move only the three intended controls.
+</Accordion>
+
+<Accordion title="MIDI works in Chrome but not Firefox">
+  Firefox does not include built-in Web MIDI support. Install the [Jazz-Plugin](https://jazz-soft.net/) browser extension, or use Chrome or Edge for MIDI-dependent Loop applications.
+</Accordion>

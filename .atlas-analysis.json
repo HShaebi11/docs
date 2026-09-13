@@ -1,0 +1,130 @@
+{
+  "projectType": "sdk-library",
+  "projectName": "Loop",
+  "projectDescription": "Loop is a TypeScript library that carries normalized packets between inputs (keyboard, gamepad, MIDI) and outputs, with a RAF-driven runtime, type-checked pipelines, reactive value handles, and a cross-device relay layer.",
+  "theme": "luma",
+  "primaryColor": "#007bff",
+  "lightColor": "#257194",
+  "darkColor": "#84bfc1",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/packets",
+              "concepts/components",
+              "concepts/handles",
+              "concepts/pipelines",
+              "concepts/runtime"
+            ]
+          },
+          {
+            "group": "Input Sources",
+            "pages": [
+              "inputs/overview",
+              "inputs/keyboard",
+              "inputs/dpad",
+              "inputs/sliders",
+              "inputs/midi"
+            ]
+          },
+          {
+            "group": "Cross-Device Relay",
+            "pages": [
+              "relay/overview",
+              "relay/transports",
+              "relay/relay-server"
+            ]
+          },
+          {
+            "group": "Examples",
+            "pages": [
+              "examples/live-text",
+              "examples/dpad-square",
+              "examples/sliders-cube",
+              "examples/cross-device"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Loop API",
+            "pages": [
+              "api/overview",
+              "api/components",
+              "api/inputs-outputs",
+              "api/pipe",
+              "api/tick"
+            ]
+          },
+          {
+            "group": "Relay API",
+            "pages": [
+              "api/relay-room",
+              "api/transports"
+            ]
+          },
+          {
+            "group": "Types",
+            "pages": [
+              "api/types"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Normalized packet contract with three kinds: value (number/Vec), frame (ImageData), and data (tagged JSON/text)",
+    "Compile-time type-checked pipelines via loop.pipe() — kind and data-type mismatches throw at wiring time, not runtime",
+    "Reactive Handle<T> with RAF-driven polling, push-based on('change') subscriptions, and DOM bind()",
+    "Built-in input sources: keyboard text, D-pad (keyboard + gamepad), sliders (gamepad left-stick + MIDI CC), MIDI CC",
+    "Cross-device relay with BroadcastChannel (same-machine, multi-tab) and WebSocket transports",
+    "Zero-render philosophy: Loop never renders anything — it only carries packets from source to sink",
+    "Works as a plain <script type='module'> in the browser with no build step required",
+    "RAF-driven runtime with automatic start/stop, Node.js-compatible setTimeout fallback"
+  ],
+  "publicApiSurface": [
+    "loop.source(def) — define a source component",
+    "loop.transform(def) — define a transform component",
+    "loop.sink(def) — define a sink component",
+    "loop.component(def) — auto-dispatch to source/transform/sink based on def shape",
+    "loop.pipe(...stages) — wire stages into a type-checked Pipeline",
+    "loop.connect(a, b) — shorthand two-stage pipe",
+    "loop.input(name) — get a Handle for a named input ('keyboard' | 'dpad')",
+    "loop.output(name) — get a stub sink for a named output",
+    "loop.tick(fn) — register a per-frame callback, returns unsubscribe fn",
+    "loop.getSlidersInput() — returns SliderBundle { x, y, rotation } as Handle<number> each",
+    "loop.getDpadActiveDevice() — returns 'none' | 'keyboard' | 'gamepad'",
+    "loop.getSlidersActiveDevice() / setSlidersActiveDevice(device)",
+    "loop.relay.room(code, transport?) — get/create a RelayRoom",
+    "loop.relay.broadcastTransport(room) — BroadcastChannel transport factory",
+    "loop.relay.websocketTransport(url, room) — WebSocket transport factory",
+    "loop.relay.memoryTransport(room) — in-memory transport factory (testing)",
+    "loop.relay.clear() — disconnect and clear all relay rooms",
+    "RelayRoom.connect() / disconnect()",
+    "RelayRoom.publish(getPacket) — tick-driven deduplicated sender",
+    "RelayRoom.subscribe<T>(initial) — returns a Handle<T> updated by transport",
+    "RelayRoom.outbound(opts) — sink Stage that sends packets over transport",
+    "RelayRoom.inbound(opts) — source Stage that reads latest received packet",
+    "RelayRoom.onStatus(fn) — subscribe to TransportStatus changes",
+    "Handle<T>.value — current value",
+    "Handle<T>.on('change', fn) — subscribe to changes, returns unsubscribe fn",
+    "Handle<T>.bind(el, apply) — bind to a DOM element with an apply callback",
+    "Pipeline.start() / stop()"
+  ]
+}

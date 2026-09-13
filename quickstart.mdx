@@ -1,47 +1,160 @@
 ---
-title: "Quickstart"
-description: "Begin with a guide on the fastest path to a successful outcome"
+title: "Get Started with Loop in Under 5 Minutes"
+sidebarTitle: "Quickstart"
+description: "Install Loop, connect a keyboard input to a DOM element, and move a square with the D-pad — all in under 5 minutes with working code examples."
 ---
 
-Describe how someone begins using your product. What is the first thing they need to do? Are there any prerequisites?
+Loop follows a consistent pattern for every integration: get an input handle, read its value, and either react to changes push-based or poll the value inside a tick callback. This guide walks you through the three most common patterns and then shows you how to assemble them into a full typed pipeline.
 
-A quickstart should take someone from zero to using your product. They'll get a quick win and a sense of what they can accomplish.
-
-## Prerequisites
-
-Before you begin, you must have:
-
-- Requirement one (for example, Node.js 18+, a free account, an API key)
-- Requirement two (for example, a compatible device, a compatible browser, a compatible operating system)
-
-## Get started
+<Tip>
+  You do not need a bundler for quick prototypes. Drop a `<script type="module">` into any HTML file and import Loop directly — no `npm install`, no build step, no config.
+</Tip>
 
 <Steps>
-  <Step title="Install">
-    Describe how to install your product or sign up.
+  <Step title="Install Loop">
+    Add the package to your project with your package manager of choice, or load it straight from a CDN for zero-build-step usage.
 
-    ```bash
-    npm install your-package
+    <CodeGroup>
+      ```bash npm
+      npm install @theinterfaces-lab/loop
+      ```
+
+      ```bash yarn
+      yarn add @theinterfaces-lab/loop
+      ```
+
+      ```bash pnpm
+      pnpm add @theinterfaces-lab/loop
+      ```
+    </CodeGroup>
+
+    To use Loop without any build step, import it as an ES module directly in your HTML:
+
+    ```html index.html
+    <script type="module">
+      import loop from "https://esm.sh/@theinterfaces-lab/loop";
+
+      const dpad = loop.input("dpad");
+      loop.tick(() => {
+        console.log(dpad.value);
+      });
+    </script>
+    ```
+
+    Once installed via npm, import the default export in your TypeScript or JavaScript files:
+
+    ```typescript app.ts
+    import loop from "@theinterfaces-lab/loop";
     ```
   </Step>
-  <Step title="Configure">
-    Describe any setup or configuration needed before first use.
 
-    ```bash
-    your-cli init
+  <Step title="Read a keyboard input">
+    `loop.input("keyboard")` returns a `Handle<string>` that mirrors the current value of whichever text input has focus. Subscribe to changes with `handle.on("change", fn)` to react instantly on every keystroke — no polling, no RAF required.
+
+    ```typescript keyboard.ts
+    import loop from "@theinterfaces-lab/loop";
+
+    const keyboard = loop.input("keyboard");
+
+    // Push-based: fires immediately on every keystroke
+    keyboard.on("change", (text) => {
+      document.getElementById("output").textContent = text;
+    });
+    ```
+
+    The callback receives the full current string value of the focused input, not just the most recent character. The returned function removes the listener when called:
+
+    ```typescript keyboard-cleanup.ts
+    import loop from "@theinterfaces-lab/loop";
+
+    const keyboard = loop.input("keyboard");
+
+    const unlisten = keyboard.on("change", (text) => {
+      document.getElementById("output").textContent = text;
+    });
+
+    // Later, when you no longer need the listener:
+    unlisten();
     ```
   </Step>
-  <Step title="Run it">
-    Show the first thing a user does to see it working.
 
-    ```bash
-    your-cli start
+  <Step title="Move an element with the D-pad">
+    `loop.input("dpad")` returns a `Handle<Vec>` whose `.value` is `{ x, y }` in the range `[-1, 1]`. It responds to arrow keys, WASD, and a physical gamepad D-pad — all merged into one handle. Use `loop.tick()` to read it on every animation frame and update your element's position.
+
+    ```typescript dpad.ts
+    import loop from "@theinterfaces-lab/loop";
+
+    const el = document.getElementById("square");
+    const dpad = loop.input("dpad");
+
+    let x = 0;
+    let y = 0;
+
+    loop.tick(() => {
+      x += dpad.value.x * 4;
+      y += dpad.value.y * 4;
+      el.style.transform = `translate(${x}px, ${y}px)`;
+    });
+    ```
+
+    `loop.tick()` registers your callback with the shared RAF loop. All registered callbacks run once per frame in the order they were added. You do not need your own `requestAnimationFrame` call.
+
+    <Note>
+      `dpad.value` is always a plain `{ x, y }` object — never `null` or `undefined`. When no key or gamepad button is pressed, both components are `0`.
+    </Note>
+  </Step>
+
+  <Step title="Build a typed pipeline">
+    For more complex data flows, wire stages together with `loop.pipe()`. A pipeline runs source → transform → sink on every RAF tick. Loop validates that adjacent stages agree on packet kind at wiring time — a mismatch throws immediately with a descriptive error.
+
+    ```typescript pipeline.ts
+    import loop from "@theinterfaces-lab/loop";
+
+    const el = document.getElementById("output");
+    const keyboard = loop.input("keyboard");
+
+    // Source: reads the current keyboard value as a data packet
+    const src = loop.source({
+      from: "keyboard",
+      emits: "data",
+      dataType: "text",
+      read() {
+        return { kind: "data", type: "text", value: keyboard.value };
+      },
+    });
+
+    // Transform: uppercases the payload
+    const upper = loop.transform({
+      accepts: "data",
+      emits: "data",
+      dataType: "text",
+      process(p) {
+        return { ...p, value: String(p.value).toUpperCase() };
+      },
+    });
+
+    // Sink: writes the result to the DOM
+    const snk = loop.sink({
+      to: "mirror",
+      accepts: "data",
+      dataType: "text",
+      render(p) {
+        el.textContent = String(p.value);
+      },
+    });
+
+    // Wire and start — Loop checks types at this point, not later
+    loop.pipe(src, upper, snk).start();
+    ```
+
+    To stop the pipeline, call `.stop()` on the returned `Pipeline` object:
+
+    ```typescript pipeline-stop.ts
+    const pipeline = loop.pipe(src, upper, snk);
+    pipeline.start();
+
+    // Later:
+    pipeline.stop();
     ```
   </Step>
 </Steps>
-
-<Tip>
-  Give people a way to get help. This could be a link to a support page, a chat with a customer support agent, or a forum for your product.
-
-  Example: Need help? Reach out to us at [support@yourcompany.com](mailto:support@yourcompany.com).
-</Tip>

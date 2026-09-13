@@ -1,0 +1,153 @@
+---
+title: "Example: Move a Square with D-pad Input"
+sidebarTitle: "D-pad Square"
+description: "Use Loop's D-pad input to move a square with arrow keys, WASD, or a gamepad. Demonstrates RAF-driven position accumulation and active-device detection."
+---
+
+This example connects Loop's `"dpad"` input to a red square that moves inside a bounded arena. Every animation frame, the current D-pad vector is multiplied by a speed constant and added to the square's position. The same code works with keyboard arrow keys, WASD, and a physical gamepad D-pad — Loop normalizes all three into a single `Vec` handle with no extra branching in your application code.
+
+## What this example shows
+
+The D-pad input returns a `Handle<Vec>` where `Vec` is `{ x: number; y: number }` with each axis ranging from −1 to 1. You accumulate those deltas each frame inside `loop.tick()` and clamp the result to your arena bounds. Loop automatically gives priority to a connected gamepad over keyboard input, and `loop.getDpadActiveDevice()` lets you surface which device is currently driving the square.
+
+<CardGroup cols={2}>
+  <Card title="RAF-driven accumulation" icon="arrows-up-down-left-right">
+    Read `dpad.value` inside `loop.tick()` each frame and add the scaled delta to your position state. The runtime calls your callback at display refresh rate.
+  </Card>
+  <Card title="Automatic device priority" icon="gamepad">
+    Gamepad input takes priority over keyboard automatically. Query `loop.getDpadActiveDevice()` to display the active device name in your UI.
+  </Card>
+</CardGroup>
+
+## Full example
+
+<Steps>
+  <Step title="Get the D-pad handle">
+    Call `loop.input("dpad")` to obtain a `Handle<Vec>`. The handle starts with `{ x: 0, y: 0 }` and updates whenever arrow keys, WASD, or a gamepad D-pad is active.
+  </Step>
+  <Step title="Register a tick callback">
+    Use `loop.tick(fn)` to register a function that runs every animation frame. Inside the callback, read `dpad.value`, scale the deltas by your speed constant, and clamp to the arena.
+  </Step>
+  <Step title="Update the DOM">
+    Apply the clamped position to `square.style.transform` so the browser can GPU-composite the move without triggering layout.
+  </Step>
+</Steps>
+
+```html index.html
+<!DOCTYPE html>
+<html lang="en">
+<body>
+  <p id="device">device: none</p>
+
+  <div id="arena" style="position:relative;width:400px;height:400px;background:#111;overflow:hidden;">
+    <div id="square" style="position:absolute;width:48px;height:48px;background:#e74c3c;border-radius:6px;top:50%;left:50%;transform:translate(-50%,-50%);"></div>
+  </div>
+
+  <script type="module">
+    import loop from "@theinterfaces-lab/loop";
+
+    const square      = document.getElementById("square");
+    const deviceLabel = document.getElementById("device");
+    const arena       = document.getElementById("arena");
+
+    const dpad = loop.input("dpad");
+
+    let posX = 0;
+    let posY = 0;
+    const SPEED = 4;
+    const HALF  = 24; // half of the 48px square
+
+    loop.tick(() => {
+      const { x, y } = dpad.value;
+
+      posX += x * SPEED;
+      posY += y * SPEED;
+
+      // Clamp to arena bounds
+      const maxX = arena.clientWidth  / 2 - HALF;
+      const maxY = arena.clientHeight / 2 - HALF;
+      posX = Math.max(-maxX, Math.min(maxX, posX));
+      posY = Math.max(-maxY, Math.min(maxY, posY));
+
+      square.style.transform = `translate(calc(-50% + ${posX}px), calc(-50% + ${posY}px))`;
+      deviceLabel.textContent = `device: ${loop.getDpadActiveDevice()}`;
+    });
+  </script>
+</body>
+</html>
+```
+
+## Step-by-step breakdown
+
+<Accordion title="loop.input('dpad') — the Vec handle">
+  `loop.input("dpad")` returns a singleton `Handle<Vec>`. The `Vec` type is `{ x: number; y: number }` where each axis is in the range −1 to 1. Diagonal keyboard input (e.g. holding both right and up) is normalized so that the magnitude never exceeds 1. The handle initializes to `{ x: 0, y: 0 }` and stays there when no input is active.
+
+  ```typescript
+  const dpad = loop.input("dpad");
+  // dpad.value → { x: 0, y: 0 } when idle
+  // dpad.value → { x: 1, y: 0 } when right arrow or D is held
+  ```
+</Accordion>
+
+<Accordion title="loop.tick(fn) — the RAF callback">
+  `loop.tick(fn)` registers a function with Loop's internal `requestAnimationFrame` loop. All registered callbacks fire in registration order once per frame. The function returns a cleanup handle — call the returned function to unregister the callback and stop it from running.
+
+  ```typescript
+  const stop = loop.tick(() => {
+    // runs every animation frame
+    square.style.transform = `translate(${posX}px, ${posY}px)`;
+  });
+
+  // Later, to stop:
+  stop();
+  ```
+</Accordion>
+
+<Accordion title="Accumulating position across frames">
+  Rather than snapping to an absolute position on each frame, multiply the unit-range Vec values by a speed constant and add them to your running position state. This produces smooth, frame-rate-independent movement when the frame delta is consistent.
+
+  ```typescript
+  const SPEED = 4; // pixels per frame at 60 fps
+
+  loop.tick(() => {
+    const { x, y } = dpad.value;
+    posX += x * SPEED;
+    posY += y * SPEED;
+  });
+  ```
+</Accordion>
+
+<Accordion title="Clamping to arena bounds">
+  After accumulating the new position, clamp it so the square cannot leave the arena. Use the arena's live `clientWidth`/`clientHeight` so the bounds respond automatically if the user resizes the window.
+
+  ```typescript
+  const maxX = arena.clientWidth  / 2 - HALF;
+  const maxY = arena.clientHeight / 2 - HALF;
+  posX = Math.max(-maxX, Math.min(maxX, posX));
+  posY = Math.max(-maxY, Math.min(maxY, posY));
+  ```
+</Accordion>
+
+<Accordion title="loop.getDpadActiveDevice() — active device label">
+  Call `loop.getDpadActiveDevice()` at any time (including inside a `tick` callback) to get a string describing the device currently driving D-pad input. Typical values are `"keyboard"`, `"gamepad"`, or `"none"`. Gamepad input takes priority over keyboard input — when a gamepad is active, keyboard input is ignored.
+
+  ```typescript
+  loop.tick(() => {
+    deviceLabel.textContent = `device: ${loop.getDpadActiveDevice()}`;
+  });
+  ```
+</Accordion>
+
+## Key points
+
+<Note>
+  D-pad `Vec` values are always in the range −1 to 1 per axis. Gamepad analog sticks are mapped to the same range, and diagonal keyboard input is magnitude-clamped to 1. You never need to normalize the input yourself before accumulating position.
+</Note>
+
+<Tip>
+  You can also use `dpad.on("change", fn)` to react to input changes outside of the RAF loop — for example, to play a sound effect when the player starts moving. The `tick` callback is the right place for continuous positional updates; `on("change", fn)` is the right place for discrete reactions.
+</Tip>
+
+<Warning>
+  Connect your gamepad before opening the page, or press a button after the page loads to let the browser detect it. The Gamepad API requires a user gesture before it surfaces connected devices.
+</Warning>

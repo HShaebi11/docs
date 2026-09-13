@@ -1,0 +1,115 @@
+---
+title: "Directional Input with the Loop D-pad Source"
+sidebarTitle: "D-pad"
+description: "The D-pad input source captures directional movement from keyboard arrow keys, WASD, or a gamepad D-pad, returning a Handle<Vec> with x and y axes normalized to −1–1."
+---
+
+The D-pad input source gives you a two-axis directional vector that works across keyboard and gamepad without any configuration. Arrow keys and WASD map to the four cardinal directions; a connected gamepad's D-pad buttons (12–15) do the same. When both devices are active simultaneously, the gamepad always takes priority. The resulting `Handle<Vec>` is sampled on every animation frame so your tick loop always sees the freshest value.
+
+## The `Vec` type
+
+The D-pad handle carries a `Vec` — a plain object with `x` and `y` properties, each clamped to the range −1 to 1.
+
+```typescript
+type Vec = { x: number; y: number };
+
+// Examples
+{ x:  0, y: -1 }  // up
+{ x:  1, y:  0 }  // right
+{ x: -1, y:  1 }  // down-left (diagonal)
+{ x:  0, y:  0 }  // no input
+```
+
+Diagonal movement is normalized so that pressing up and right simultaneously does not produce a vector longer than 1.
+
+## Getting the handle
+
+Call `loop.input("dpad")` to obtain the singleton `Handle<Vec>`. The handle is created once and reused on subsequent calls.
+
+```typescript
+import loop from "@theinterfaces-lab/loop";
+
+const dpad = loop.input("dpad"); // Handle<Vec>
+```
+
+## Moving an element each frame
+
+Read `dpad.value` inside `loop.tick()` to integrate velocity into a position on every animation frame.
+
+```typescript sketch.ts
+import loop from "@theinterfaces-lab/loop";
+
+const dpad = loop.input("dpad");
+let x = 0, y = 0;
+
+loop.tick(() => {
+  x = Math.max(0, Math.min(400, x + dpad.value.x * 4));
+  y = Math.max(0, Math.min(400, y + dpad.value.y * 4));
+  square.style.transform = `translate(${x}px, ${y}px)`;
+});
+```
+
+<Tip>
+  Always read `dpad.value` **inside** `loop.tick()`, not outside it. The D-pad is polled on the RAF loop — the value is refreshed each frame by an internal sampler. Reading it once at startup will always return `{ x: 0, y: 0 }`.
+</Tip>
+
+## Key and button mappings
+
+| Input | Direction |
+|-------|-----------|
+| `ArrowUp` / `W` / `w` | `y = -1` |
+| `ArrowDown` / `S` / `s` | `y = +1` |
+| `ArrowLeft` / `A` / `a` | `x = -1` |
+| `ArrowRight` / `D` / `d` | `x = +1` |
+| Gamepad button 12 | `y = -1` |
+| Gamepad button 13 | `y = +1` |
+| Gamepad button 14 | `x = -1` |
+| Gamepad button 15 | `x = +1` |
+
+<Note>
+  Gamepad input takes priority over keyboard input. When at least one gamepad D-pad button is pressed, keyboard directional keys are ignored for that frame. If the gamepad reports no D-pad activity, the keyboard state is used instead.
+</Note>
+
+## Detecting the active device
+
+Call `loop.getDpadActiveDevice()` to find out which input device is currently driving the D-pad. Use this to show contextual UI hints — for example, displaying keyboard legends on desktop and gamepad button icons when a controller is connected.
+
+```typescript hints.ts
+import loop from "@theinterfaces-lab/loop";
+
+loop.tick(() => {
+  const device = loop.getDpadActiveDevice(); // "none" | "keyboard" | "gamepad"
+
+  keyboardHint.hidden = device !== "keyboard";
+  gamepadHint.hidden  = device !== "gamepad";
+});
+```
+
+The return values map to the following states:
+
+| Value | Meaning |
+|-------|---------|
+| `"none"` | No directional input is active this frame |
+| `"keyboard"` | Arrow keys or WASD are driving the vector |
+| `"gamepad"` | Gamepad D-pad buttons 12–15 are driving the vector |
+
+## Using D-pad in a pipeline
+
+The D-pad emits `value` packets. Wire it into a source stage by reading `dpad.value` in the `read()` function.
+
+```typescript pipeline.ts
+import loop from "@theinterfaces-lab/loop";
+
+const dpad = loop.input("dpad");
+
+const dpadSource = loop.source({
+  emits: "value",
+  read() {
+    return { kind: "value", value: dpad.value };
+  },
+});
+```
+
+## How it works
+
+The D-pad source attaches `keydown` and `keyup` listeners to `document` and maintains a `Set` of currently pressed keys. On every RAF tick, an internal sampler function polls both the keyboard state and the Gamepad API (`navigator.getGamepads()`), combines them according to priority rules, and writes the result into the handle via `_setValue`. The `normalizeVec` utility clamps each axis to −1–1 before the value is stored.

@@ -1,0 +1,185 @@
+---
+title: "Pipeline Wiring API: loop.pipe() and loop.connect()"
+sidebarTitle: "Pipe"
+description: "Reference for loop.pipe() and loop.connect() — the wiring functions that validate stage compatibility and create a runnable Pipeline with start() and stop()."
+---
+
+Stages become useful only when they are wired together into a pipeline. `loop.pipe()` validates every adjacent pair of stages for kind compatibility and returns a `Pipeline` object you can start and stop at will. The validation happens **at call time**, not at runtime — so a misconfigured pipeline throws before your app ever tries to run it.
+
+## `loop.pipe(...stages)`
+
+Chains two or more stages into a `Pipeline`. For each adjacent pair, Loop checks that the left stage's `emits` kind appears in the right stage's `accepts` list. If the kinds are both `"data"` and both sides declare a `dataType`, Loop also checks that the `dataType` strings match.
+
+<ParamField body="stages" type="Stage[]" required>
+  Two or more stages in order: source → (optional transforms) → sink. At minimum one stage is needed, but a useful pipeline always has at least two. Stages are validated left-to-right; the first mismatch throws immediately.
+</ParamField>
+
+**Returns:** `Pipeline`
+
+**Throws:** `"Type mismatch: …"` when `emits` ≠ `accepts`, or `"Data type mismatch: …"` when both stages specify a `dataType` that doesn't match.
+
+```typescript valid-pipeline.ts
+import loop from "@theinterfaces-lab/loop";
+
+const dpad = loop.input("dpad");
+
+const source = loop.source({
+  from: "dpad-source",
+  emits: "value",
+  read() {
+    return { kind: "value", value: dpad.value };
+  },
+});
+
+const scale = loop.transform({
+  accepts: "value",
+  emits: "value",
+  process(packet) {
+    if (packet.kind !== "value" || typeof packet.value !== "number") return packet;
+    return { kind: "value", value: packet.value * 300 };
+  },
+});
+
+const display = loop.sink({
+  to: "position-display",
+  accepts: "value",
+  render(packet) {
+    if (packet.kind !== "value") return;
+    const { x, y } = packet.value as { x: number; y: number };
+    player.style.transform = `translate(${x * 300}px, ${y * 300}px)`;
+  },
+});
+
+// Validated at this line — throws if kinds don't align
+const pipeline = loop.pipe(source, scale, display);
+
+pipeline.start();
+```
+
+```typescript type-mismatch-example.ts
+import loop from "@theinterfaces-lab/loop";
+
+const frameSource = loop.source({
+  from: "camera",
+  emits: "frame",
+  read() { return { kind: "frame", frame: currentFrame }; },
+});
+
+const valueSink = loop.sink({
+  to: "number-output",
+  accepts: "value",    // ← expects "value", but upstream emits "frame"
+  render(packet) { console.log(packet); },
+});
+
+// Throws immediately:
+// Type mismatch: "camera" emits "frame" but "number-output" accepts [value]
+const broken = loop.pipe(frameSource, valueSink);
+```
+
+```typescript data-type-mismatch-example.ts
+import loop from "@theinterfaces-lab/loop";
+
+const poseSource = loop.source({
+  from: "pose-detector",
+  emits: "data",
+  dataType: "pose",
+  read() { return { kind: "data", type: "pose", value: latestPose }; },
+});
+
+const gestureSink = loop.sink({
+  to: "gesture-handler",
+  accepts: "data",
+  dataType: "gesture",   // ← "pose" ≠ "gesture"
+  render(packet) { console.log(packet); },
+});
+
+// Throws immediately:
+// Data type mismatch: "pose-detector" emits data:"pose"
+// but "gesture-handler" expects data:"gesture"
+const broken = loop.pipe(poseSource, gestureSink);
+```
+
+---
+
+## `loop.connect(a, b)`
+
+A convenience shorthand for `loop.pipe(a, b)`. Use it when you have exactly two stages and don't need the variadic syntax.
+
+<ParamField body="a" type="Stage" required>
+  The upstream stage (source or transform).
+</ParamField>
+
+<ParamField body="b" type="Stage" required>
+  The downstream stage (transform or sink).
+</ParamField>
+
+**Returns:** `Pipeline`
+
+```typescript connect-example.ts
+import loop from "@theinterfaces-lab/loop";
+
+const keyboard = loop.input("keyboard");
+
+const keySource = loop.source({
+  from: "keyboard-source",
+  emits: "data",
+  dataType: "key",
+  read() {
+    const key = keyboard.value;
+    if (!key) return null;
+    return { kind: "data", type: "key", value: key };
+  },
+});
+
+const keySink = loop.sink({
+  to: "key-display",
+  accepts: "data",
+  dataType: "key",
+  render(packet) {
+    if (packet.kind === "data") {
+      display.textContent = `Last key: ${packet.value}`;
+    }
+  },
+});
+
+// Identical to loop.pipe(keySource, keySink)
+const pipeline = loop.connect(keySource, keySink);
+pipeline.start();
+```
+
+---
+
+## The `Pipeline` object
+
+Both `loop.pipe()` and `loop.connect()` return a `Pipeline`. You control execution by calling `start()` and `stop()` on it.
+
+<ResponseField name="start()" type="() => void">
+  Registers the pipeline with the runtime. From this point on, every RAF frame runs the pipeline: the source's `read()` is called, packets flow through transforms, and the sink's `render()` fires. Safe to call multiple times — the runtime deduplicates.
+</ResponseField>
+
+<ResponseField name="stop()" type="() => void">
+  Unregisters the pipeline from the runtime. The source, transforms, and sink are no longer called. Call `start()` again to resume.
+</ResponseField>
+
+<ResponseField name="stages" type="Stage[]">
+  The ordered array of stages passed to `loop.pipe()`. Read-only in practice — do not mutate this array after creation.
+</ResponseField>
+
+```typescript pipeline-lifecycle.ts
+import loop from "@theinterfaces-lab/loop";
+
+const pipeline = loop.pipe(source, transform, sink);
+
+// Start running
+pipeline.start();
+
+// Pause after 5 seconds
+setTimeout(() => pipeline.stop(), 5000);
+
+// Resume after 10 seconds
+setTimeout(() => pipeline.start(), 10000);
+```
+
+<Tip>
+  Create and validate your pipelines eagerly at module load time, then call `start()` lazily when the user is ready. This way any wiring errors surface immediately during development, not mid-session.
+</Tip>

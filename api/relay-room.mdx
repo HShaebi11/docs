@@ -1,0 +1,296 @@
+---
+title: "RelayRoom API: Publish, Subscribe, and Pipeline Integration"
+sidebarTitle: "RelayRoom"
+description: "Reference for the RelayRoom object — connect to a room, publish packets, subscribe to incoming packets, or wire the relay into a Loop pipeline using outbound and inbound stages."
+---
+
+The `RelayRoom` is the central object for cross-context communication in Loop. Obtain one by calling `loop.relay.room(code)`, then use its methods to push packets to peers, receive packets from them, or slot the relay directly into a `loop.pipe()` pipeline as a source or sink stage. All rooms with the same code automatically communicate with each other through the chosen transport.
+
+## `loop.relay.room(code, transport?)`
+
+Returns a `RelayRoom` instance for the given room code. Calling this function multiple times with the same code returns the **same cached instance** — the room is a singleton per code within the current page context.
+
+<ParamField path="code" type="string" required>
+  The room identifier. Any peer — in another tab, device, or in-process context — that calls `loop.relay.room()` with the same code will exchange packets with this room.
+</ParamField>
+
+<ParamField path="transport" type="Transport">
+  The transport implementation to use. Defaults to `loop.relay.broadcastTransport(code)` when omitted, which routes packets through the browser's `BroadcastChannel` API. Pass a `websocketTransport` or `memoryTransport` to override. See [Transports](/api/transports) for details.
+</ParamField>
+
+**Returns:** `RelayRoom`
+
+<Note>
+  Calling `loop.relay.room(code)` a second time returns the existing `RelayRoom` without creating a new one — the `transport` argument is **ignored** on subsequent calls for the same code. If you need to use a different transport for a given code, call `loop.relay.clear()` first to reset the registry.
+</Note>
+
+---
+
+## `RelayRoom` Methods
+
+### `room.connect()`
+
+Connects the underlying transport. Call this before publishing or subscribing. Returns a `Promise<void>` that resolves once the transport reports a `"connected"` status.
+
+```typescript relay-connect.ts
+import loop from "@theinterfaces-lab/loop";
+
+const relay = loop.relay.room("demo");
+await relay.connect();
+```
+
+If the transport is already connected, calling `connect()` again is a no-op.
+
+---
+
+### `room.disconnect()`
+
+Disconnects the transport and removes this room from the internal registry. After disconnecting, the next call to `loop.relay.room(code)` will create a fresh `RelayRoom`.
+
+```typescript relay-disconnect.ts
+import loop from "@theinterfaces-lab/loop";
+
+const relay = loop.relay.room("demo");
+await relay.connect();
+
+// Later — clean up when your component unmounts
+relay.disconnect();
+```
+
+---
+
+### `room.publish(getPacket)`
+
+Registers a per-frame callback that reads a packet and sends it over the transport whenever the packet's content changes. Loop calls `getPacket` once per animation frame; if the returned packet is identical to the last one sent (compared via `JSON.stringify`), no message is sent.
+
+<ParamField path="getPacket" type="() => Packet | null" required>
+  A function called every RAF tick. Return a `Packet` to send, or `null` to skip this frame entirely.
+</ParamField>
+
+**Returns:** `() => void` — call the returned function to unregister the publisher and stop sending.
+
+```typescript relay-publish.ts
+import loop from "@theinterfaces-lab/loop";
+
+const relay = loop.relay.room("sensor");
+await relay.connect();
+
+const keyboard = loop.input("keyboard");
+
+const unsub = relay.publish(() => ({
+  kind: "data",
+  type: "keypress",
+  value: keyboard.value,
+}));
+
+// Stop publishing later
+unsub();
+```
+
+<Note>
+  `publish` uses JSON-diff deduplication: it serializes the packet with `JSON.stringify` and only calls `transport.send()` when the result differs from the last sent value. This keeps the wire quiet when nothing has changed, even across many RAF ticks.
+</Note>
+
+---
+
+### `room.subscribe<T>(initial)`
+
+Creates a reactive `Handle<T>` that updates whenever the room receives a `value` packet. Use this when you want a handle-based reactive value from a remote peer, without wiring up a full pipeline.
+
+<ParamField path="initial" type="T extends number | Vec" required>
+  The value the handle holds before any packet arrives from the remote peer.
+</ParamField>
+
+**Returns:** `Handle<T>` — the same handle interface used everywhere in Loop. Read `.value`, listen with `.on("change", fn)`, or drive DOM updates with `.bind(el, apply)`.
+
+<Note>
+  `subscribe` only updates from `value`-kind packets (those carrying a `number` or `Vec`). For `data`-kind packets, use `room.inbound()` in a pipeline instead.
+</Note>
+
+```typescript relay-subscribe.ts
+import loop from "@theinterfaces-lab/loop";
+
+const relay = loop.relay.room("controls");
+await relay.connect();
+
+// Remote peer is publishing a Vec (e.g. a d-pad position)
+const position = relay.subscribe({ x: 0, y: 0 });
+
+// Read reactively
+position.on("change", (v) => {
+  console.log("Remote position:", v.x, v.y);
+});
+
+// Or bind to a DOM element each frame
+position.bind(document.querySelector("#cursor"), (v, el) => {
+  (el as HTMLElement).style.transform = `translate(${v.x * 100}px, ${v.y * 100}px)`;
+});
+```
+
+---
+
+### `room.outbound(opts)`
+
+Returns a **sink** `Stage` suitable for use as the last stage in a `loop.pipe()` call. Each time the pipeline ticks, the stage calls `transport.send()` with the current packet.
+
+<ParamField path="opts.accepts" type="Kind | Kind[]" required>
+  The packet kind (or array of kinds) this stage accepts. Must match what the previous stage in your pipeline emits. Valid values: `"value"`, `"frame"`, `"data"`.
+</ParamField>
+
+<ParamField path="opts.dataType" type="string">
+  When `accepts` is `"data"`, an optional tag to narrow the accepted data type. Loop enforces this tag at wiring time when both the upstream stage and this stage declare a `dataType`.
+</ParamField>
+
+**Returns:** `Stage`
+
+```typescript relay-outbound.ts
+import loop from "@theinterfaces-lab/loop";
+
+const relay = loop.relay.room("chat");
+await relay.connect();
+
+const keyboardSrc = loop.source({
+  from: "keyboard-input",
+  emits: "data",
+  read() {
+    return {
+      kind: "data",
+      type: "text",
+      value: loop.input("keyboard").value,
+    };
+  },
+});
+
+loop.pipe(keyboardSrc, relay.outbound({ accepts: "data", dataType: "text" })).start();
+```
+
+---
+
+### `room.inbound(opts)`
+
+Returns a **source** `Stage` suitable for use as the first stage in a `loop.pipe()` call. Each frame, it reads the most recently received packet from the transport and passes it downstream.
+
+<ParamField path="opts.emits" type="Kind" required>
+  The packet kind this stage emits. Must match what the next stage in your pipeline accepts. Valid values: `"value"`, `"frame"`, `"data"`.
+</ParamField>
+
+<ParamField path="opts.dataType" type="string">
+  When `emits` is `"data"`, an optional tag to narrow the emitted data type. Used for type checking when the downstream stage also declares a `dataType`.
+</ParamField>
+
+**Returns:** `Stage`
+
+If no packet has arrived yet, `inbound` returns `null` for that frame and the pipeline skips rendering.
+
+```typescript relay-inbound.ts
+import loop from "@theinterfaces-lab/loop";
+
+const relay = loop.relay.room("chat");
+await relay.connect();
+
+const el = document.querySelector<HTMLElement>("#output")!;
+
+const displaySink = loop.sink({
+  to: "chat-display",
+  accepts: "data",
+  dataType: "text",
+  render(packet) {
+    if (packet.kind === "data") el.textContent = String(packet.value);
+  },
+});
+
+loop.pipe(relay.inbound({ emits: "data", dataType: "text" }), displaySink).start();
+```
+
+---
+
+### `room.onStatus(fn)`
+
+Subscribes to `TransportStatus` changes on the underlying transport. Fires whenever the transport moves through its connection lifecycle.
+
+<ParamField path="fn" type="(status: TransportStatus) => void" required>
+  Callback invoked with the new status string. Possible values: `"idle"`, `"connecting"`, `"connected"`, `"disconnected"`, `"error"`.
+</ParamField>
+
+**Returns:** `() => void` — unsubscribe function.
+
+```typescript relay-status.ts
+import loop from "@theinterfaces-lab/loop";
+
+const relay = loop.relay.room("demo");
+
+const unsub = relay.onStatus((status) => {
+  console.log("Transport status:", status);
+  if (status === "error") {
+    // Handle reconnection logic here
+  }
+});
+
+await relay.connect();
+
+// Clean up when done
+unsub();
+```
+
+---
+
+## Full Pipeline Example
+
+The example below shows a complete two-endpoint setup: one pipeline sends keyboard input outbound over the relay, and a second pipeline reads it back inbound and writes it to the DOM. In a real application, each pipeline would run in a different tab or device.
+
+```typescript full-pipeline.ts
+import loop from "@theinterfaces-lab/loop";
+
+// ─── Sender side ───────────────────────────────────────────────────────────
+
+const senderRelay = loop.relay.room("chat");
+await senderRelay.connect();
+
+const keyboardSrc = loop.source({
+  from: "keyboard",
+  emits: "data",
+  read() {
+    return {
+      kind: "data",
+      type: "text",
+      value: loop.input("keyboard").value,
+    };
+  },
+});
+
+loop.pipe(keyboardSrc, senderRelay.outbound({ accepts: "data", dataType: "text" })).start();
+
+// ─── Receiver side ─────────────────────────────────────────────────────────
+
+const receiverRelay = loop.relay.room("chat");
+await receiverRelay.connect();
+
+const el = document.querySelector<HTMLElement>("#output")!;
+
+const domSink = loop.sink({
+  to: "chat-display",
+  accepts: "data",
+  dataType: "text",
+  render(packet) {
+    if (packet.kind === "data") el.textContent = String(packet.value);
+  },
+});
+
+loop.pipe(receiverRelay.inbound({ emits: "data", dataType: "text" }), domSink).start();
+```
+
+---
+
+## `loop.relay.clear()`
+
+Disconnects all active `RelayRoom` instances and empties the internal room registry. Useful in tests or when you need to fully reset relay state between scenarios.
+
+```typescript relay-clear.ts
+import loop from "@theinterfaces-lab/loop";
+
+// Tear everything down — all rooms are disconnected and de-registered
+loop.relay.clear();
+
+// The next call to loop.relay.room("demo") will create a fresh instance
+const fresh = loop.relay.room("demo");
+```

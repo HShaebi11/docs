@@ -1,0 +1,77 @@
+---
+title: "Loop Input Sources: Keyboard, D-pad, Sliders, and MIDI"
+sidebarTitle: "Overview"
+description: "Loop provides built-in input sources for keyboard text, directional axes, analog sliders, and MIDI CC — each returning a typed Handle you read in your tick loop or subscribe to."
+---
+
+Inputs are the left end of the wire. Each input source produces typed packets every frame (or on change), and you access them through a `Handle` — a lightweight object that holds the latest value and lets you subscribe to updates. Loop ships four built-in input sources that cover the most common browser interaction patterns without any additional dependencies.
+
+## Available input sources
+
+<CardGroup cols={2}>
+  <Card title="Keyboard" icon="keyboard" href="/inputs/keyboard">
+    Captures text from any focused `<textarea>` or `<input>`. Returns a `Handle<string>` that fires `change` on every keystroke. Packet kind: `data`.
+  </Card>
+  <Card title="D-pad" icon="gamepad" href="/inputs/dpad">
+    Reads directional movement from keyboard arrow keys, WASD, or a gamepad D-pad. Returns a `Handle<Vec>` with `x` and `y` axes normalized to −1–1. Packet kind: `value`.
+  </Card>
+  <Card title="Sliders" icon="sliders" href="/inputs/sliders">
+    Provides three `Handle<number>` values — `x`, `y`, and `rotation` — each normalized to 0–1. Sources: gamepad left-stick and right trigger, MIDI CC, or on-screen range inputs. Packet kind: `value`.
+  </Card>
+  <Card title="MIDI" icon="music" href="/inputs/midi">
+    Maps MIDI Control Change messages to the sliders bundle automatically. Auto-initializes when you call `getSlidersInput()`. Requires Chrome or Edge with HTTPS. Packet kind: `value`.
+  </Card>
+</CardGroup>
+
+## Getting a handle
+
+Use `loop.input(name)` to retrieve the `keyboard` or `dpad` handle by name. For sliders, use the dedicated `loop.getSlidersInput()` function, which returns a `SliderBundle` with three separate handles.
+
+```typescript
+import loop from "@theinterfaces-lab/loop";
+
+// Single handles — keyboard and dpad
+const keyboard = loop.input("keyboard");  // Handle<string>
+const dpad     = loop.input("dpad");      // Handle<Vec>
+
+// Slider bundle — three handles at once
+const { x, y, rotation } = loop.getSlidersInput();  // each Handle<number>
+```
+
+<Note>
+  Calling `loop.input("sliders")` throws an error. The sliders input returns multiple handles, so it is exposed through `loop.getSlidersInput()` instead. This keeps the return type of `loop.input()` unambiguous.
+</Note>
+
+## Reading values: poll vs. subscribe
+
+Loop gives you two patterns for reading a handle's current value. Choose the one that matches how your input is used.
+
+**Poll inside `loop.tick()`** — best for continuous inputs like `dpad` and `sliders`, where you want the latest value on every animation frame:
+
+```typescript
+loop.tick(() => {
+  // dpad.value and x.value are updated each frame by the RAF sampler
+  canvas.x += dpad.value.x * speed;
+  canvas.y += dpad.value.y * speed;
+  mesh.rotation.z = rotation.value * Math.PI * 2;
+});
+```
+
+**Subscribe with `handle.on("change", fn)`** — best for discrete, event-driven inputs like `keyboard`, where you only need to react when the value actually changes:
+
+```typescript
+keyboard.on("change", (text) => {
+  preview.textContent = text;
+});
+```
+
+Both patterns work for any handle; the choice is a matter of whether your downstream logic is frame-driven or event-driven.
+
+## Input source reference
+
+| Input | API | Handle type | Packet kind | Value range |
+|-------|-----|-------------|-------------|-------------|
+| Keyboard | `loop.input("keyboard")` | `Handle<string>` | `data` | Any string |
+| D-pad | `loop.input("dpad")` | `Handle<Vec>` | `value` | −1 to 1 per axis |
+| Sliders | `loop.getSlidersInput()` | `SliderBundle` | `value` | 0 to 1 per axis |
+| MIDI CC | Auto via `getSlidersInput()` | (part of `SliderBundle`) | `value` | 0 to 1 (normalized from 0–127) |

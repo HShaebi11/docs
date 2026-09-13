@@ -1,0 +1,227 @@
+---
+title: "Component Factory API: source, transform, sink"
+sidebarTitle: "Components"
+description: "Reference for loop.source(), loop.transform(), loop.sink(), and loop.component() — the four factory functions that create pipeline stages in Loop."
+---
+
+Every pipeline is made of stages. A stage is a plain object with a `role`, a name, and one active function — `read`, `process`, or `render`. The four factory functions below construct stages and enforce the correct shape at call time so the compiler catches mismatches before the browser does.
+
+## `loop.source(def)`
+
+A source is the origin of a pipeline. On every RAF frame the runtime calls `def.read()`, and if it returns a packet that packet travels downstream through the rest of the pipeline.
+
+<ParamField body="def.from" type="string" required>
+  A human-readable label for this stage. Appears in error messages when a type mismatch is detected at pipe wiring time.
+</ParamField>
+
+<ParamField body="def.emits" type='"value" | "frame" | "data"' required>
+  The kind of packet this source produces. Must match what the next stage accepts, or `loop.pipe()` throws immediately.
+</ParamField>
+
+<ParamField body="def.read" type="() => Packet | null" required>
+  Called once per frame. Return a `Packet` to push data downstream, or `null` to skip this frame entirely. The runtime does **not** call downstream stages when `read` returns `null`.
+</ParamField>
+
+<ParamField body="def.dataType" type="string">
+  Optional. When `emits` is `"data"`, set this to a string tag (e.g. `"pose"`) so that `loop.pipe()` can verify the adjacent stage expects the same data type.
+</ParamField>
+
+**Returns:** `Stage`
+
+```typescript source-example.ts
+import loop from "@theinterfaces-lab/loop";
+
+const mouseSource = loop.source({
+  from: "mouse-position",
+  emits: "value",
+  read() {
+    // Returns the latest normalized mouse position as a Vec packet
+    return { kind: "value", value: { x: mouseX, y: mouseY } };
+  },
+});
+```
+
+```typescript data-source-example.ts
+import loop from "@theinterfaces-lab/loop";
+
+const poseSource = loop.source({
+  from: "pose-detector",
+  emits: "data",
+  dataType: "pose",
+  read() {
+    return { kind: "data", type: "pose", value: latestPose };
+  },
+});
+```
+
+---
+
+## `loop.transform(def)`
+
+A transform sits between a source and a sink. It receives the packet emitted by the previous stage, processes it, and passes a new packet to the next stage. The input and output kinds can differ.
+
+<ParamField body="def.accepts" type='"value" | "frame" | "data" | Kind[]' required>
+  The kind(s) of packets this transform accepts. Pass a single kind string or an array to accept multiple kinds.
+</ParamField>
+
+<ParamField body="def.emits" type='"value" | "frame" | "data"' required>
+  The kind of packet this transform produces after processing.
+</ParamField>
+
+<ParamField body="def.process" type="(packet: Packet) => Packet" required>
+  Called once per frame when an upstream packet is available. Receives the incoming `Packet` and must return a new `Packet` to continue the pipeline.
+</ParamField>
+
+<ParamField body="def.dataType" type="string">
+  Optional. Constrains the `type` field when `emits` or `accepts` is `"data"`, enabling stricter wiring-time checks in `loop.pipe()`.
+</ParamField>
+
+**Returns:** `Stage`
+
+```typescript transform-example.ts
+import loop from "@theinterfaces-lab/loop";
+
+// Scale a value packet by a constant factor
+const scaleTransform = loop.transform({
+  accepts: "value",
+  emits: "value",
+  process(packet) {
+    if (packet.kind !== "value" || typeof packet.value !== "number") {
+      return packet;
+    }
+    return { kind: "value", value: packet.value * 2.5 };
+  },
+});
+```
+
+```typescript frame-to-data-transform.ts
+import loop from "@theinterfaces-lab/loop";
+
+// Convert a raw frame into a tagged data packet for downstream analysis
+const analyzeTransform = loop.transform({
+  accepts: "frame",
+  emits: "data",
+  dataType: "brightness",
+  process(packet) {
+    const brightness = computeBrightness((packet as { kind: "frame"; frame: ImageData }).frame);
+    return { kind: "data", type: "brightness", value: brightness };
+  },
+});
+```
+
+---
+
+## `loop.sink(def)`
+
+A sink is the terminal stage of a pipeline. It receives a packet and produces a side effect — updating the DOM, writing to a canvas, logging to the console, or anything else. It does not return a packet.
+
+<ParamField body="def.to" type="string" required>
+  A human-readable label for this stage. Appears in error messages when wiring fails.
+</ParamField>
+
+<ParamField body="def.accepts" type='"value" | "frame" | "data" | Kind[]' required>
+  The kind(s) of packets this sink accepts. Must be compatible with what the previous stage emits.
+</ParamField>
+
+<ParamField body="def.render" type="(packet: Packet) => void" required>
+  Called once per frame when an upstream packet arrives. Perform your side effect here — draw to a canvas, set a CSS property, dispatch a DOM event, etc.
+</ParamField>
+
+<ParamField body="def.dataType" type="string">
+  Optional. When `accepts` is `"data"`, set this to enforce that only packets with a matching `type` field are wired to this sink.
+</ParamField>
+
+**Returns:** `Stage`
+
+```typescript sink-dom-example.ts
+import loop from "@theinterfaces-lab/loop";
+
+const positionSink = loop.sink({
+  to: "avatar-position",
+  accepts: "value",
+  render(packet) {
+    if (packet.kind !== "value") return;
+    const { x, y } = packet.value as { x: number; y: number };
+    avatar.style.transform = `translate(${x * 400}px, ${y * 400}px)`;
+  },
+});
+```
+
+```typescript sink-canvas-example.ts
+import loop from "@theinterfaces-lab/loop";
+
+const canvasSink = loop.sink({
+  to: "canvas-renderer",
+  accepts: "frame",
+  render(packet) {
+    if (packet.kind !== "frame") return;
+    ctx.putImageData(packet.frame, 0, 0);
+  },
+});
+```
+
+---
+
+## `loop.component(def)`
+
+`loop.component()` is a single entry point that inspects the definition object and delegates to `source`, `transform`, or `sink` automatically. Use it when you want to build stages dynamically or write utilities that don't know the role in advance.
+
+<ParamField body="def" type="SourceDef | TransformDef | SinkDef" required>
+  Any valid component definition. The function reads which key is present — `read` → source, `process` → transform, `render` → sink — and dispatches accordingly. Throws if none of those keys exists.
+</ParamField>
+
+**Returns:** `Stage`
+
+```typescript component-example.ts
+import loop from "@theinterfaces-lab/loop";
+
+function buildStage(config: { mode: "read" | "render" }) {
+  if (config.mode === "read") {
+    return loop.component({
+      from: "dynamic-source",
+      emits: "value",
+      read() {
+        return { kind: "value", value: Math.random() };
+      },
+    });
+  }
+
+  return loop.component({
+    to: "dynamic-sink",
+    accepts: "value",
+    render(packet) {
+      console.log("received:", packet);
+    },
+  });
+}
+```
+
+<Note>
+  Use `loop.component()` when you want a single function to build any stage type dynamically. For static code where the role is known at authoring time, prefer `loop.source()`, `loop.transform()`, or `loop.sink()` — they give you more precise TypeScript inference.
+</Note>
+
+---
+
+## The `Stage` object
+
+All four factories return the same `Stage` interface. You will generally pass stages directly into `loop.pipe()` rather than inspecting them, but the fields are available if you need them.
+
+<ResponseField name="role" type='"source" | "transform" | "sink"'>
+  The stage's role in a pipeline.
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  The label provided as `from` or `to` in the definition.
+</ResponseField>
+
+<ResponseField name="emits" type="Kind | undefined">
+  The kind of packet this stage emits, or `undefined` for sinks.
+</ResponseField>
+
+<ResponseField name="accepts" type="Kind | Kind[] | undefined">
+  The kind(s) of packets this stage accepts, or `undefined` for sources.
+</ResponseField>
+
+<ResponseField name="dataType" type="string | undefined">
+  Optional data-type tag used for stricter `"data"` packet wiring checks.
+</ResponseField>

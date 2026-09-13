@@ -1,0 +1,80 @@
+---
+title: "Loop: Carry Packets Between Inputs and Outputs"
+sidebarTitle: "Introduction"
+description: "Loop is a TypeScript library that normalizes browser inputs — keyboard, gamepad, MIDI — and carries them to any output without rendering anything itself."
+---
+
+Loop is a TypeScript/ESM library that acts as the wire between inputs and outputs in the browser. You author the two ends — where data comes from and where it goes — and Loop normalizes it into typed packets and carries those packets between them. Loop never renders anything, mounts any DOM, or depend on any framework. It is purely the conduit.
+
+## The wire metaphor
+
+When you wire up a hardware synth, you plug a cable between an output jack and an input jack. The cable does not care what the signal means; it just carries it faithfully. Loop works the same way.
+
+You create a **source** (a keyboard, a gamepad, a MIDI controller, or any custom reader) and a **sink** (a canvas, a DOM element, a WebSocket, or any custom writer). Loop carries a normalized **packet** from the source to the sink on every animation frame. The semantics belong entirely to you — Loop only ensures the packet arrives with its type intact.
+
+This means Loop is compatible with every framework and with no framework at all. React, Vue, Svelte, vanilla JS — the wire does not care what sits at either end.
+
+## The zero-render philosophy
+
+Most browser input libraries bundle abstractions for rendering the state they produce — UI components, virtual DOM patches, CSS classes. Loop deliberately does none of this. Its single responsibility is data transport.
+
+The benefits of this constraint are:
+
+- **No bundle bloat from unused UI.** You import exactly what you wire.
+- **No framework coupling.** Loop works identically in a React app, a plain HTML file, or a WebWorker.
+- **No opinions about your output.** A `frame` packet can go to a `<canvas>` 2D context, a WebGL texture, or a server-side image pipeline — Loop does not know or care.
+
+<Note>
+  Loop ships as a pure ES module with no build step required. You can import it directly in a `<script type="module">` tag in any modern browser, making it ideal for quick prototypes and live demos without a bundler.
+</Note>
+
+## Three packet kinds
+
+Every value that flows through Loop is wrapped in one of three packet shapes. The packet kind determines which sources and sinks can be wired together — Loop enforces this at pipeline construction time, not at runtime.
+
+<AccordionGroup>
+  <Accordion title="value — number or Vec">
+    A `value` packet carries a `number` or a `Vec` (`{ x, y, z? }`). This is the default kind for continuous inputs like gamepad axes, MIDI knobs, and slider bundles. Normalised to `[-1, 1]` for bipolar signals and `[0, 1]` for unipolar signals.
+
+    ```typescript
+    { kind: "value"; value: number | Vec }
+    ```
+  </Accordion>
+  <Accordion title="frame — ImageData">
+    A `frame` packet carries a raw `ImageData` object — the contents of a canvas frame, a video frame, or any pixel buffer. Designed for sources and sinks that work with bitmaps rather than numbers.
+
+    ```typescript
+    { kind: "frame"; frame: ImageData }
+    ```
+  </Accordion>
+  <Accordion title="data — tagged arbitrary value">
+    A `data` packet carries any value together with a string `type` tag. Use this for text, JSON, events, or any structured payload that does not fit the numeric or bitmap kinds.
+
+    ```typescript
+    { kind: "data"; type: string; value: unknown }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Key capabilities
+
+**Type-checked pipelines.** `loop.pipe(...stages)` validates that every adjacent pair of stages agree on packet kind and, for `data` packets, on their `dataType` tag. A mismatch throws at wiring time with a clear error message, not silently at runtime.
+
+**Reactive handles.** Every built-in input returns a `Handle<T>` — a live reference to the current value. You can read it synchronously (`handle.value`), subscribe to changes push-based (`handle.on("change", fn)`), or bind it to a DOM element declaratively (`handle.bind(el, applyFn)`).
+
+**Built-in inputs.** Loop ships three ready-to-use inputs out of the box: `"keyboard"` (a `Handle<string>` that mirrors the focused text input), `"dpad"` (a `Handle<Vec>` driven by arrow keys, WASD, or a gamepad D-pad), and a slider bundle (`loop.getSlidersInput()`) that maps gamepad axes and MIDI CCs to three named scalar handles.
+
+**RAF-driven runtime.** `loop.tick(fn)` registers a callback that runs on every `requestAnimationFrame`. All handle samplers and pipeline stages are driven by the same RAF loop, so your logic stays frame-synchronised without managing your own animation loop.
+
+**Cross-device relay.** `loop.relay.room(code, transport?)` creates a named room that can send and receive packets over `BroadcastChannel` (same-origin tabs), WebSocket (different devices), or an in-memory channel (testing). The relay server is a single Node.js script included in the package.
+
+## Ready to build?
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Get a working keyboard input and a moving square in under five minutes.
+  </Card>
+  <Card title="Core Concepts" icon="cube" href="/concepts/packets">
+    Go deeper on packets, handles, stages, and the runtime.
+  </Card>
+</CardGroup>

@@ -1,0 +1,106 @@
+---
+title: "Reading Keyboard Text Input with Loop"
+sidebarTitle: "Keyboard"
+description: "The keyboard input source captures text from any focused textarea or input element, returning a Handle<string> that fires a change event on every keystroke."
+---
+
+The keyboard input source listens for `input` events on `<textarea>` and `<input>` elements anywhere in the document. Each time the user types a character — adding, deleting, or replacing text — the handle's value updates to the element's full current content and fires a `change` event to all subscribers. You never need to attach your own event listeners or manage element references.
+
+## Getting the handle
+
+Call `loop.input("keyboard")` once to obtain the singleton `Handle<string>`. Calling it multiple times always returns the same handle.
+
+```typescript
+import loop from "@theinterfaces-lab/loop";
+
+const keyboard = loop.input("keyboard"); // Handle<string>
+```
+
+## The `Handle<string>` interface
+
+The handle exposes three ways to consume keyboard values:
+
+| Member | Description |
+|--------|-------------|
+| `keyboard.value` | The current text string. Empty string until the user types. |
+| `keyboard.on("change", fn)` | Registers a callback that fires on every keystroke. Returns an unsubscribe function. |
+| `keyboard.bind(el, apply)` | Binds the handle to a DOM element; `apply` is called immediately and on every change. |
+
+<Note>
+  The keyboard handle is **push-based**, not polled. When a keystroke occurs, the `change` event fires synchronously inside the browser's `input` event handler — before the next animation frame. This gives you lower latency than reading `keyboard.value` inside `loop.tick()`.
+</Note>
+
+## Usage examples
+
+The three patterns below cover the most common ways to consume keyboard input in a Loop application.
+
+```typescript app.ts
+import loop from "@theinterfaces-lab/loop";
+
+const keyboard = loop.input("keyboard");
+
+// Option 1: Subscribe to changes (push-based — fires on every keystroke)
+keyboard.on("change", (text) => {
+  preview.textContent = text;
+});
+
+// Option 2: Bind to a DOM element
+keyboard.bind(output, (text) => {
+  output.textContent = text.toUpperCase();
+});
+
+// Option 3: Use in a pipeline
+const src = loop.source({
+  emits: "data",
+  read() { return { kind: "data", type: "text", value: keyboard.value }; },
+});
+```
+
+### Unsubscribing
+
+`handle.on()` and `handle.bind()` both return an unsubscribe function. Call it when you no longer need the subscription to avoid memory leaks.
+
+```typescript
+const off = keyboard.on("change", (text) => {
+  if (text.length > 280) {
+    counter.textContent = "Too long!";
+    off(); // stop listening
+  }
+});
+```
+
+## Using keyboard input in a pipeline
+
+Inside a Loop pipeline, emit keyboard text as a `data` packet with `type: "text"`. This keeps the packet kind consistent with how `keyboardSourceRead` works internally.
+
+```typescript pipeline.ts
+import loop from "@theinterfaces-lab/loop";
+
+const keyboard = loop.input("keyboard");
+
+const textSource = loop.source({
+  emits: "data",
+  read() {
+    return { kind: "data", type: "text", value: keyboard.value };
+  },
+});
+
+const upper = loop.transform({
+  accepts: ["data"],
+  emits: "data",
+  transform(packet) {
+    if (packet.kind !== "data") return packet;
+    return { kind: "data", type: "text", value: String(packet.value).toUpperCase() };
+  },
+});
+
+loop.pipe(textSource, upper);
+```
+
+## How it works
+
+Internally, Loop registers a single `input` event listener on `document`. When the event fires, it checks whether the event target is an `HTMLTextAreaElement` or `HTMLInputElement`. If so, it calls `handle._setValue(target.value)`, which updates the stored value and notifies all `change` subscribers. No per-element setup is required — any focusable text input on the page contributes to the same handle.
+
+<Tip>
+  If you need per-element tracking (e.g. multiple independent text fields), build a lightweight custom source with `loop.source()` that reads from a specific element reference. The built-in keyboard handle is intentionally a single global stream of "whatever the user is typing."
+</Tip>

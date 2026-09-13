@@ -1,0 +1,178 @@
+---
+title: "Loop Transport API: BroadcastChannel, WebSocket, and Memory"
+sidebarTitle: "Transports"
+description: "Reference for Loop's three transport implementations — broadcastTransport for multi-tab, websocketTransport for cross-device, and memoryTransport for testing."
+---
+
+A `Transport` is the object that actually moves packets between peers. Loop ships three implementations: `broadcastTransport` for same-origin multi-tab communication, `websocketTransport` for cross-device or cross-origin communication through a relay server, and `memoryTransport` for synchronous in-process communication during testing. All three satisfy the same `Transport` interface, so you can swap them into `loop.relay.room()` without changing any other code.
+
+## The `Transport` Interface
+
+Every transport implementation satisfies this interface. You interact with transports indirectly through `RelayRoom`, but you can also use a transport directly if you need lower-level control.
+
+```typescript transport-interface.ts
+interface Transport {
+  readonly status: TransportStatus;
+  connect(): Promise<void>;
+  disconnect(): void;
+  send(packet: Packet): void;
+  onPacket(fn: (packet: Packet) => void): () => void;
+  onStatus(fn: (status: TransportStatus) => void): () => void;
+}
+
+type TransportStatus = "idle" | "connecting" | "connected" | "disconnected" | "error";
+```
+
+Each method on the interface maps to a step in the transport lifecycle:
+
+- **`status`** — current connection state; one of the five `TransportStatus` string literals.
+- **`connect()`** — opens the underlying channel; resolves when the transport reaches `"connected"`.
+- **`disconnect()`** — closes the channel and transitions status to `"disconnected"`.
+- **`send(packet)`** — serializes and pushes a packet to all peers in the same room. Silently no-ops when the transport is not `"connected"`.
+- **`onPacket(fn)`** — registers a listener for incoming packets; returns an unsubscribe function.
+- **`onStatus(fn)`** — registers a listener for status changes; returns an unsubscribe function.
+
+### Status Lifecycle
+
+A transport moves through its states in a predictable order. After construction the status is `"idle"`. Calling `connect()` moves it to `"connecting"`, then to `"connected"` on success or `"error"` on failure. Calling `disconnect()` from any non-idle state moves it to `"disconnected"`.
+
+```
+idle → connecting → connected → disconnected
+                 ↘ error
+```
+
+<Warning>
+  `frame` packets (`{ kind: "frame"; frame: ImageData }`) **cannot be sent over any transport**. Calling `transport.send()` with a frame packet throws: `"Frame packets cannot be relayed yet"`. Only `value` and `data` packets are serializable over the wire. Filter or transform frame packets before they reach a relay stage.
+</Warning>
+
+---
+
+## `loop.relay.broadcastTransport(roomCode)`
+
+Creates a transport backed by the browser's [`BroadcastChannel`](https://developer.mozilla.org/en-US/docs/Web/API/BroadcastChannel) API. All tabs on the same origin that share the same `roomCode` receive every packet sent by any tab. No server is required.
+
+<ParamField path="roomCode" type="string" required>
+  The room identifier. The transport opens a `BroadcastChannel` named `"loop-relay:<roomCode>"`. All tabs using the same room code and origin join the same channel automatically.
+</ParamField>
+
+**Returns:** `Transport`
+
+```typescript broadcast-transport.ts
+import loop from "@theinterfaces-lab/loop";
+
+const transport = loop.relay.broadcastTransport("my-room");
+const relay = loop.relay.room("my-room", transport);
+await relay.connect();
+```
+
+<Note>
+  `broadcastTransport` is the **default transport** used by `loop.relay.room(code)` when you do not pass a second argument. You only need to call it explicitly if you want to construct the transport separately before passing it to `room()`.
+</Note>
+
+**Characteristics:**
+
+- Same machine, same origin, multiple tabs or workers
+- No network latency — packets are delivered synchronously within the browser process
+- Does not work across different origins, devices, or Node.js environments
+- Throws an `"error"` status if `BroadcastChannel` is unavailable (e.g. in some test runners)
+
+---
+
+## `loop.relay.websocketTransport(url, roomCode)`
+
+Creates a transport that connects to a WebSocket relay server. Use this transport when you need to communicate across devices, different origins, or outside the browser entirely.
+
+<ParamField path="url" type="string" required>
+  The base URL of the relay server. If the URL contains the literal placeholder `{room}`, Loop replaces it with the URL-encoded room code. Otherwise, Loop appends `/<encodedRoomCode>` to the URL after stripping any trailing slash.
+</ParamField>
+
+<ParamField path="roomCode" type="string" required>
+  The room identifier. URL-encoded before being interpolated or appended to the server URL.
+</ParamField>
+
+**Returns:** `Transport`
+
+**URL construction examples:**
+
+| `url` argument | `roomCode` | Resolved endpoint |
+|---|---|---|
+| `"ws://localhost:8787"` | `"my-room"` | `ws://localhost:8787/my-room` |
+| `"wss://relay.example.com/"` | `"demo"` | `wss://relay.example.com/demo` |
+| `"wss://relay.example.com/rooms/{room}/ws"` | `"demo"` | `wss://relay.example.com/rooms/demo/ws` |
+
+<CodeGroup>
+```typescript websocket-transport.ts
+import loop from "@theinterfaces-lab/loop";
+
+// Start the relay server first: npm run relay
+const transport = loop.relay.websocketTransport("ws://localhost:8787", "my-room");
+const relay = loop.relay.room("my-room", transport);
+await relay.connect();
+```
+
+```typescript websocket-template-url.ts
+import loop from "@theinterfaces-lab/loop";
+
+// Use the {room} placeholder for custom server URL schemes
+const transport = loop.relay.websocketTransport(
+  "wss://relay.example.com/rooms/{room}/ws",
+  "demo"
+);
+const relay = loop.relay.room("demo", transport);
+await relay.connect();
+```
+</CodeGroup>
+
+**Characteristics:**
+
+- Cross-device and cross-origin communication
+- Requires the Loop relay server (`npm run relay` starts it on port 8787)
+- `connect()` is asynchronous — it awaits the WebSocket `open` event before resolving
+- Status becomes `"error"` if the socket closes before opening, or if `WebSocket` is unavailable
+- Accepts both text and binary (`ArrayBuffer`) frames from the server
+
+<Tip>
+  Run `npm run relay` in the Loop package directory to start a Node.js WebSocket relay server on `ws://localhost:8787`. The server routes packets between all clients connected to the same room path.
+</Tip>
+
+---
+
+## `loop.relay.memoryTransport(roomCode)`
+
+Creates a fully in-process, synchronous transport. All `memoryTransport` instances sharing the same `roomCode` form a single shared room: a packet sent by one instance is immediately delivered to all `onPacket` listeners registered on any instance with the same code.
+
+<ParamField path="roomCode" type="string" required>
+  The room identifier. All `memoryTransport` instances created with the same code share the same singleton — calling `memoryTransport("test")` twice returns the same object.
+</ParamField>
+
+**Returns:** `Transport`
+
+```typescript memory-transport.ts
+import loop from "@theinterfaces-lab/loop";
+
+// Both sides get the same underlying MemoryTransport instance
+const senderRelay = loop.relay.room(
+  "test-room",
+  loop.relay.memoryTransport("test-room")
+);
+const receiverRelay = loop.relay.room(
+  "test-room-rx",
+  loop.relay.memoryTransport("test-room")
+);
+
+await senderRelay.connect();
+await receiverRelay.connect();
+
+// Packets sent on senderRelay are received synchronously on receiverRelay
+```
+
+<Warning>
+  `memoryTransport` is **intended for testing only**. It delivers packets synchronously and in-process, which means it does not reflect real-world network latency, ordering, or failure modes. Do not ship it in production code.
+</Warning>
+
+**Characteristics:**
+
+- No browser APIs required — works in Node.js, Deno, Bun, and JSDOM
+- `connect()` resolves immediately (synchronously transitions to `"connected"`)
+- Packets are dispatched synchronously within the same microtask
+- Singleton per room code — use different codes to isolate independent test rooms

@@ -1,0 +1,76 @@
+---
+title: "Loop API Reference Overview"
+sidebarTitle: "Overview"
+description: "The complete Loop API: component factories, pipeline wiring, input sources, the tick loop, and the relay namespace — all on the default export from @theinterfaces-lab/loop."
+---
+
+Everything in Loop lives on a single default export. You import `loop` once and reach every factory, wiring helper, input source, and relay utility through it — no named submodule imports required.
+
+```typescript
+import loop from "@theinterfaces-lab/loop";
+```
+
+<CardGroup cols={2}>
+  <Card title="Component Factories" icon="cubes" href="/api/components">
+    Create pipeline stages with `loop.source()`, `loop.transform()`, `loop.sink()`, and the universal `loop.component()` dispatcher.
+  </Card>
+  <Card title="Pipeline Wiring" icon="arrow-right-arrow-left" href="/api/pipe">
+    Connect stages into a runnable pipeline with `loop.pipe()` or `loop.connect()`. Type mismatches throw immediately at wiring time — never at runtime.
+  </Card>
+  <Card title="Inputs & Outputs" icon="gamepad" href="/api/inputs-outputs">
+    Read from built-in input sources: `loop.input("keyboard")`, `loop.input("dpad")`, `loop.getSlidersInput()`, and device-detection helpers.
+  </Card>
+  <Card title="Tick Loop" icon="rotate" href="/api/tick">
+    Register per-frame callbacks with `loop.tick(fn)`. Returns an unsubscribe function. Auto-starts the RAF-driven runtime on first call.
+  </Card>
+</CardGroup>
+
+## API groups at a glance
+
+### Component factories
+
+| Function | Returns | Purpose |
+|---|---|---|
+| `loop.source(def)` | `Stage` | Produces packets each frame from a `read()` function |
+| `loop.transform(def)` | `Stage` | Converts an incoming packet to another via `process()` |
+| `loop.sink(def)` | `Stage` | Consumes packets with a `render()` function |
+| `loop.component(def)` | `Stage` | Auto-dispatches to source, transform, or sink based on which key is present |
+
+### Pipeline wiring
+
+| Function | Returns | Purpose |
+|---|---|---|
+| `loop.pipe(...stages)` | `Pipeline` | Validates and chains two or more stages |
+| `loop.connect(a, b)` | `Pipeline` | Shorthand for `loop.pipe(a, b)` |
+
+### Inputs & outputs
+
+| Function | Returns | Purpose |
+|---|---|---|
+| `loop.input(name)` | `Handle<string \| Vec \| number>` | Singleton handle for `"keyboard"` or `"dpad"` |
+| `loop.getSlidersInput()` | `SliderBundle` | `{ x, y, rotation }` handles, initializes MIDI |
+| `loop.resolveInput(name)` | `Handle \| SliderBundle` | Like `input()` but also works for `"sliders"` |
+| `loop.output(name)` | `Stage` | Reserved output stub (not yet implemented) |
+| `loop.getDpadActiveDevice()` | `string` | `"none"`, `"keyboard"`, or `"gamepad"` |
+| `loop.getSlidersActiveDevice()` | `string` | Active device for the sliders bundle |
+| `loop.setSlidersActiveDevice(device)` | `void` | Override the active device for sliders |
+
+### Runtime
+
+| Function | Returns | Purpose |
+|---|---|---|
+| `loop.tick(fn)` | `() => void` | Register a per-frame callback; returns an unsubscribe function |
+
+### Relay namespace
+
+| Function | Returns | Purpose |
+|---|---|---|
+| `loop.relay.room(code, transport?)` | `RelayRoom` | Open or retrieve a relay room by code |
+| `loop.relay.broadcastTransport(code)` | `Transport` | BroadcastChannel transport (same-origin tabs) |
+| `loop.relay.websocketTransport(url)` | `Transport` | WebSocket transport for cross-device relay |
+| `loop.relay.memoryTransport()` | `Transport` | In-memory transport for testing |
+| `loop.relay.clear()` | `void` | Disconnect and remove all relay rooms |
+
+<Note>
+  `loop.layout`, `loop.filter`, and `loop.capture` are stubs reserved for future releases. Calling any of them throws `"not implemented"` immediately. Do not call them in production code.
+</Note>

@@ -1,0 +1,151 @@
+---
+title: "Example: Control a 3D Cube with Sliders and MIDI"
+sidebarTitle: "Sliders Cube"
+description: "Use Loop's sliders bundle to control a Three.js cube with gamepad analog sticks, MIDI CC knobs, or on-screen HTML range sliders as an automatic fallback."
+---
+
+This example drives a Three.js cube's position and Z-rotation using Loop's `getSlidersInput()` bundle. Three named handles — `x`, `y`, and `rotation` — each carry a normalized value between 0 and 1. They respond to gamepad analog sticks and triggers, MIDI CC knobs, or on-screen `<input type="range">` sliders as a fallback. When a higher-priority device takes over, the on-screen sliders sync their position to match.
+
+## What this example shows
+
+`loop.getSlidersInput()` returns a `SliderBundle` — an object with three `Handle<number>` properties. Each handle normalizes its source to the 0–1 range so your rendering code only needs a single linear mapping regardless of which device is active. MIDI is initialized automatically when you call `getSlidersInput()`, and the first three MIDI CC numbers to arrive are mapped to `x`, `y`, and `rotation` in order.
+
+<CardGroup cols={3}>
+  <Card title="Gamepad sticks" icon="gamepad">
+    Left stick X/Y axes and the right trigger map to the three handles automatically. Values are polled every animation frame.
+  </Card>
+  <Card title="MIDI knobs" icon="music">
+    MIDI is initialized on first call to `getSlidersInput()`. The first three CC numbers received map to x, y, and rotation in arrival order.
+  </Card>
+  <Card title="On-screen sliders" icon="sliders">
+    HTML `<input type="range">` elements serve as the fallback. When gamepad or MIDI takes over, the on-screen sliders sync to the active values.
+  </Card>
+</CardGroup>
+
+## Loop-specific code
+
+The snippet below focuses on the Loop wiring. The Three.js scene setup (renderer, camera, geometry, lights) is standard boilerplate and is omitted for clarity.
+
+```html index.html
+<!DOCTYPE html>
+<html lang="en">
+<body>
+  <canvas id="canvas"></canvas>
+  <p id="device">device: on-screen</p>
+
+  <div class="controls">
+    <label>X       <input type="range" id="slider-x" min="0" max="100" value="50" /></label>
+    <label>Y       <input type="range" id="slider-y" min="0" max="100" value="50" /></label>
+    <label>Rotate  <input type="range" id="slider-r" min="0" max="100" value="0"  /></label>
+  </div>
+
+  <script type="module">
+    import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js";
+    import loop from "@theinterfaces-lab/loop";
+
+    // ── Three.js scene setup (omitted for brevity) ──────────────────────────
+    // const scene, camera, renderer, cube = ...
+
+    const deviceLabel = document.getElementById("device");
+    const sliderX     = document.getElementById("slider-x");
+    const sliderY     = document.getElementById("slider-y");
+    const sliderR     = document.getElementById("slider-r");
+
+    // getSlidersInput() initializes MIDI automatically
+    const { x, y, rotation } = loop.getSlidersInput();
+
+    // On-screen sliders as fallback: push normalized values into each handle
+    function bindOnScreenSlider(el, handle) {
+      el.addEventListener("input", () => {
+        handle._setValue(Number(el.value) / 100);
+        loop.setSlidersActiveDevice("on-screen");
+      });
+    }
+
+    bindOnScreenSlider(sliderX, x);
+    bindOnScreenSlider(sliderY, y);
+    bindOnScreenSlider(sliderR, rotation);
+
+    loop.tick(() => {
+      // Map 0-1 handles to scene coordinates and rotation
+      cube.position.x  = (x.value - 0.5) * 2;
+      cube.position.y  = (y.value - 0.5) * 2;
+      cube.rotation.y  = rotation.value * Math.PI * 2;
+
+      renderer.render(scene, camera);
+
+      deviceLabel.textContent = `device: ${loop.getSlidersActiveDevice()}`;
+
+      // Sync on-screen sliders when a gamepad or MIDI device takes over
+      if (loop.getSlidersActiveDevice() !== "on-screen") {
+        sliderX.value = String(Math.round(x.value        * 100));
+        sliderY.value = String(Math.round(y.value        * 100));
+        sliderR.value = String(Math.round(rotation.value * 100));
+      }
+    });
+  </script>
+</body>
+</html>
+```
+
+## Step-by-step breakdown
+
+<Accordion title="loop.getSlidersInput() — the SliderBundle">
+  `loop.getSlidersInput()` returns a `SliderBundle`: `{ x: Handle<number>, y: Handle<number>, rotation: Handle<number> }`. Each handle holds a value in the 0–1 range. The function is a singleton — calling it multiple times returns the same handles. It also triggers MIDI initialization as a side effect, so you do not need to set up MIDI separately.
+
+  ```typescript
+  const { x, y, rotation } = loop.getSlidersInput();
+
+  // Read in a tick callback:
+  loop.tick(() => {
+    console.log(x.value, y.value, rotation.value);
+  });
+  ```
+</Accordion>
+
+<Accordion title="handle._setValue() — pushing on-screen slider values">
+  The `Handle` interface exposes `_setValue(v)` as the low-level write path. Call it from your on-screen slider's `"input"` event to feed a normalized value back into the handle. After calling `_setValue`, call `loop.setSlidersActiveDevice("on-screen")` so the device label reflects the correct source.
+
+  ```typescript
+  sliderX.addEventListener("input", () => {
+    x._setValue(Number(sliderX.value) / 100);
+    loop.setSlidersActiveDevice("on-screen");
+  });
+  ```
+</Accordion>
+
+<Accordion title="Syncing on-screen sliders when gamepad or MIDI takes over">
+  When `loop.getSlidersActiveDevice()` returns something other than `"on-screen"`, the on-screen sliders are not the active input source. Sync their `value` attributes to the current handle values each frame so they don't jump if the user switches back.
+
+  ```typescript
+  loop.tick(() => {
+    if (loop.getSlidersActiveDevice() !== "on-screen") {
+      sliderX.value = String(Math.round(x.value        * 100));
+      sliderY.value = String(Math.round(y.value        * 100));
+      sliderR.value = String(Math.round(rotation.value * 100));
+    }
+  });
+  ```
+</Accordion>
+
+<Accordion title="Mapping 0-1 values to Three.js coordinates">
+  All three handles produce values in the 0–1 range. Map them to your scene's coordinate space with a simple linear transform. For position, subtract 0.5 and scale to center the neutral position at the origin. For rotation, multiply by `2π` to span a full revolution.
+
+  ```typescript
+  loop.tick(() => {
+    cube.position.x = (x.value - 0.5) * 2;   // -1 … +1
+    cube.position.y = (y.value - 0.5) * 2;   // -1 … +1
+    cube.rotation.y = rotation.value * Math.PI * 2; // 0 … 2π
+  });
+  ```
+</Accordion>
+
+## Key points
+
+<Note>
+  MIDI is initialized automatically when you call `getSlidersInput()`. The first three MIDI CC numbers to arrive map to `x`, `y`, and `rotation` in that order. You do not need to configure which CC numbers to use — Loop learns them from the first incoming messages.
+</Note>
+
+<Tip>
+  You can call `loop.getSlidersActiveDevice()` anywhere — including outside of `loop.tick()` — to read the current active device synchronously. Use it to conditionally render UI hints about the active input source.
+</Tip>

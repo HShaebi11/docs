@@ -1,0 +1,212 @@
+---
+title: "Input and Output API: loop.input() and loop.getSlidersInput()"
+sidebarTitle: "Inputs & Outputs"
+description: "Reference for loop.input(), loop.getSlidersInput(), loop.output(), and the device detection helpers — the built-in input source factory functions."
+---
+
+Loop ships three built-in input sources out of the box — keyboard text, a directional pad (keyboard arrows, WASD, or gamepad D-pad), and a three-axis sliders bundle (on-screen, gamepad axes, or MIDI). Each returns a `Handle` whose `.value` is always fresh and whose `.on("change", fn)` fires on every change.
+
+## `loop.input(name)`
+
+Retrieves a singleton `Handle` for a named built-in input. Calling this function multiple times with the same name always returns the exact same handle instance — the underlying listeners are only attached once.
+
+<ParamField query="name" type='"keyboard" | "dpad"' required>
+  The name of the built-in input source to retrieve.
+
+  - `"keyboard"` — returns a `Handle<string>` whose value is the last key pressed. Clears to `""` on `keyup`.
+  - `"dpad"` — returns a `Handle<Vec>` with `x` and `y` in the range `[-1, 1]`, driven by arrow keys, WASD, or gamepad buttons 12–15.
+</ParamField>
+
+**Returns:** `Handle<string>` when `name` is `"keyboard"`, `Handle<Vec>` when `name` is `"dpad"`.
+
+```typescript keyboard-example.ts
+import loop from "@theinterfaces-lab/loop";
+
+const keyboard = loop.input("keyboard");
+
+// Read the current value synchronously
+console.log(keyboard.value); // e.g. "a"
+
+// Subscribe to changes
+keyboard.on("change", (key) => {
+  if (key === "Enter") submitForm();
+});
+```
+
+```typescript dpad-example.ts
+import loop from "@theinterfaces-lab/loop";
+
+const dpad = loop.input("dpad");
+
+// Bind directly to a DOM element — runs every frame
+dpad.bind(avatar, (vec, el) => {
+  (el as HTMLElement).style.transform =
+    `translate(${vec.x * 200}px, ${vec.y * 200}px)`;
+});
+```
+
+<Note>
+  `loop.input()` returns a **singleton** — calling `loop.input("dpad")` twice returns the exact same `Handle<Vec>` instance. All listeners and bindings share the same underlying sampler.
+</Note>
+
+<Warning>
+  Passing `"sliders"` to `loop.input()` throws an error:
+  `Input "sliders" returns multiple handles. Use loop.input("sliders").x / .y / .rotation`
+  Use `loop.getSlidersInput()` instead, which returns the full `SliderBundle`.
+</Warning>
+
+---
+
+## `loop.getSlidersInput()`
+
+Returns the singleton `SliderBundle` — three coordinated `Handle<number>` instances that represent a set of continuous control axes. Also initializes MIDI access on first call so that physical MIDI controllers can drive the bundle.
+
+**Returns:** `SliderBundle`
+
+```typescript
+interface SliderBundle {
+  x:        Handle<number>;  // 0–1, default 0.5
+  y:        Handle<number>;  // 0–1, default 0.5
+  rotation: Handle<number>;  // 0–1, default 0
+}
+```
+
+Each handle's value stays in the range `[0, 1]`. The active device is determined in this priority order: gamepad left stick + right trigger → MIDI → on-screen controls.
+
+```typescript sliders-example.ts
+import loop from "@theinterfaces-lab/loop";
+
+const { x, y, rotation } = loop.getSlidersInput();
+
+loop.tick(() => {
+  hue.style.filter   = `hue-rotate(${x.value * 360}deg)`;
+  brightness.style.filter = `brightness(${y.value * 2})`;
+  ring.style.transform = `rotate(${rotation.value * 360}deg)`;
+});
+```
+
+<Tip>
+  Call `loop.getSlidersInput()` early in your setup — before the first user gesture — so that MIDI access is requested before the browser's autoplay policies kick in.
+</Tip>
+
+---
+
+## `loop.resolveInput(name)`
+
+A lower-level variant of `loop.input()` that does **not** throw for `"sliders"`. It returns whatever the registry holds for the given name, including the `SliderBundle` object.
+
+<ParamField query="name" type="string" required>
+  The name of the built-in input. Accepts `"keyboard"`, `"dpad"`, or `"sliders"`. Throws for any other string with `Unknown input: "…"`.
+</ParamField>
+
+**Returns:** `Handle<string> | Handle<Vec> | Handle<number> | SliderBundle`
+
+```typescript resolve-input-example.ts
+import loop from "@theinterfaces-lab/loop";
+
+// Safe to call with "sliders" — returns the full bundle
+const sliders = loop.resolveInput("sliders");
+
+if ("x" in sliders) {
+  console.log("slider x:", sliders.x.value);
+}
+```
+
+---
+
+## `loop.output(name)`
+
+Creates or retrieves a named output `Stage`. The returned stage is a valid sink that you can wire into a pipeline with `loop.pipe()`.
+
+<ParamField query="name" type="string" required>
+  An arbitrary label for the output destination (e.g. `"display"`, `"haptics"`).
+</ParamField>
+
+**Returns:** `Stage` (a sink that accepts `"value"`, `"frame"`, and `"data"`)
+
+<Warning>
+  `loop.output()` currently returns a stub. If the pipeline runs and reaches this stage's `render` function, it throws `Output "name" has no hardware sink registered (coming in slice 4+)`. Hardware output sinks are not yet implemented.
+</Warning>
+
+---
+
+## `loop.getDpadActiveDevice()`
+
+Returns the name of the device that last produced non-zero input on the D-pad handle. Useful for adapting UI hints to the current input method.
+
+**Returns:** `"none" | "keyboard" | "gamepad"`
+
+```typescript dpad-device-example.ts
+import loop from "@theinterfaces-lab/loop";
+
+const dpad = loop.input("dpad");
+
+loop.tick(() => {
+  const device = loop.getDpadActiveDevice();
+  hint.textContent = device === "gamepad"
+    ? "Use the D-pad"
+    : device === "keyboard"
+      ? "Use Arrow keys or WASD"
+      : "";
+});
+```
+
+---
+
+## `loop.getSlidersActiveDevice()`
+
+Returns the name of the device currently driving the sliders bundle.
+
+**Returns:** `string` — one of `"on-screen"`, `"gamepad"`, or `"midi"`
+
+```typescript sliders-device-example.ts
+import loop from "@theinterfaces-lab/loop";
+
+loop.tick(() => {
+  const device = loop.getSlidersActiveDevice();
+  deviceLabel.textContent = `Sliders: ${device}`;
+});
+```
+
+---
+
+## `loop.setSlidersActiveDevice(device)`
+
+Overrides the active device for the sliders bundle. Use this when you want to lock input to a specific source or implement a device-switching UI.
+
+<ParamField body="device" type="string" required>
+  The device name to set. Supported values: `"on-screen"`, `"gamepad"`, `"midi"`.
+</ParamField>
+
+**Returns:** `void`
+
+```typescript set-device-example.ts
+import loop from "@theinterfaces-lab/loop";
+
+// Force MIDI mode when a controller connects
+navigator.requestMIDIAccess().then((access) => {
+  access.onstatechange = (e) => {
+    if (e.port.type === "input" && e.port.state === "connected") {
+      loop.setSlidersActiveDevice("midi");
+    }
+  };
+});
+```
+
+---
+
+## The `Handle<T>` interface
+
+All input functions return handles. A handle is a reactive container that holds a value, notifies listeners when it changes, and can be bound to a DOM element for automatic per-frame updates.
+
+<ResponseField name="value" type="T">
+  The current value. Read this synchronously at any time — it is always up to date after handles are ticked at the top of each RAF frame.
+</ResponseField>
+
+<ResponseField name="on(event, fn)" type='(event: "change", fn: (v: T) => void) => () => void'>
+  Subscribe to changes. The callback fires whenever the value changes within a frame. Returns an unsubscribe function.
+</ResponseField>
+
+<ResponseField name="bind(el, apply)" type="(el: unknown, apply: (v: T, el: unknown) => void) => () => void">
+  Bind a DOM element to this handle. The `apply` function runs once immediately and then once per frame. Automatically registers the handle with the runtime. Returns an unbind function.
+</ResponseField>

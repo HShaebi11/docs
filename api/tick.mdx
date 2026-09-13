@@ -1,0 +1,103 @@
+---
+title: "loop.tick(): Register Per-Frame Callbacks"
+sidebarTitle: "Tick"
+description: "Reference for loop.tick() — the function that registers a callback to run on every requestAnimationFrame tick. Returns an unsubscribe function to stop the callback."
+---
+
+The Loop runtime is driven by `requestAnimationFrame`. Every frame it ticks handles, runs pipelines, and then calls any functions you registered with `loop.tick()`. Use `loop.tick()` for any per-frame work that reads handle values and directly updates the DOM — positioning, CSS properties, canvas drawing, or anything else that needs to stay in sync with the display refresh rate.
+
+## `loop.tick(fn)`
+
+Registers a callback to run on every RAF frame. The callback fires after all handles have been updated and all pipelines have run, so `handle.value` is guaranteed to reflect the latest input when your function executes.
+
+Calling `loop.tick()` auto-starts the runtime. You do not need to call any separate `start()` function.
+
+<ParamField body="fn" type="() => void" required>
+  A zero-argument function called once per frame. Keep it fast — it runs synchronously inside the RAF callback, blocking the next paint until it returns.
+</ParamField>
+
+**Returns:** `() => void` — an unsubscribe function. Call it to remove `fn` from the frame loop.
+
+```typescript tick-basic.ts
+import loop from "@theinterfaces-lab/loop";
+
+const dpad = loop.input("dpad");
+const speed = 4;
+
+const stop = loop.tick(() => {
+  el.style.transform = `translate(${dpad.value.x * speed}px, ${dpad.value.y * speed}px)`;
+});
+
+// Stop when done (e.g., on component unmount)
+stop();
+```
+
+```typescript tick-sliders.ts
+import loop from "@theinterfaces-lab/loop";
+
+const { x, y, rotation } = loop.getSlidersInput();
+
+const stop = loop.tick(() => {
+  canvas.style.filter     = `hue-rotate(${x.value * 360}deg)`;
+  canvas.style.opacity    = String(y.value);
+  canvas.style.transform  = `rotate(${rotation.value * 360}deg)`;
+});
+```
+
+```typescript tick-multiple.ts
+import loop from "@theinterfaces-lab/loop";
+
+// Register multiple independent callbacks — each runs every frame
+const stopPhysics   = loop.tick(updatePhysics);
+const stopParticles = loop.tick(updateParticles);
+const stopHUD       = loop.tick(renderHUD);
+
+// Stop individual callbacks independently
+function cleanup() {
+  stopPhysics();
+  stopParticles();
+  stopHUD();
+}
+```
+
+## Execution order within a frame
+
+The runtime processes three things on each frame, in this order:
+
+1. **Handle ticks** — all registered handles sample their input sources and fire `"change"` listeners for anything that changed.
+2. **Pipeline runs** — every started pipeline reads from its source, passes packets through transforms, and calls the sink's `render` function.
+3. **Tick callbacks** — every function registered with `loop.tick()` runs in the order it was registered.
+
+This ordering means that by the time your `loop.tick()` callback runs, `handle.value` already reflects the current frame's input. You never need to worry about stale values.
+
+## When to use `loop.tick()` vs `handle.on("change", fn)`
+
+<Tip>
+  Call `loop.tick()` for any per-frame work that reads handle values and updates the DOM — movement, animation, continuous rendering. For discrete events such as keyboard text input where you only care about *what changed*, use `handle.on("change", fn)` instead — it fires only when the value actually changes, not every frame.
+</Tip>
+
+```typescript tick-vs-change.ts
+import loop from "@theinterfaces-lab/loop";
+
+const keyboard = loop.input("keyboard");
+const dpad     = loop.input("dpad");
+
+// Discrete text input — only fires when the key changes
+keyboard.on("change", (key) => {
+  if (key === "Enter") submitSearch(searchBox.value);
+});
+
+// Continuous position — runs every frame whether or not dpad changed
+loop.tick(() => {
+  player.style.transform =
+    `translate(${dpad.value.x * 200}px, ${dpad.value.y * 200}px)`;
+});
+```
+
+## Runtime internals
+
+`loop.tick()` delegates to the singleton `Runtime` class. The runtime uses `requestAnimationFrame` in browser environments and falls back to `setTimeout(..., 16)` in environments where `requestAnimationFrame` is not available (such as Node.js tests).
+
+<Note>
+  The runtime starts automatically the first time you call `loop.tick()`, `loop.pipe(...).start()`, or `handle.bind()`. You never need to call a global `loop.start()`.
+</Note>

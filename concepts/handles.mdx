@@ -1,0 +1,147 @@
+---
+title: "Reactive Handles: Read, Subscribe, and Bind Values"
+sidebarTitle: "Handles"
+description: "A Handle gives you reactive access to any continuously changing value in Loop — read it synchronously, subscribe to changes, or bind it directly to a DOM element."
+---
+
+When you call `loop.input("keyboard")` or `loop.input("dpad")`, you get back a **Handle** — a typed reactive container that always holds the current value of that input. Handles are the bind-first alternative to pipelines: instead of declaring a source, transform, and sink, you grab a handle and either read from it inside a tick callback, subscribe to changes as they happen, or let Loop update a DOM element for you automatically.
+
+## The Handle interface
+
+```typescript handle.ts
+interface Handle<T = number | Vec> {
+  readonly value: T;                                              // current value (synchronous read)
+  on(event: "change", fn: (v: T) => void): () => void;          // push subscription
+  bind(el: Element, apply: (v: T) => void): () => void;         // DOM binding
+}
+```
+
+The generic type parameter `T` is inferred from the input:
+
+| Input | Handle type |
+|---|---|
+| `loop.input("keyboard")` | `Handle<string>` |
+| `loop.input("dpad")` | `Handle<Vec>` |
+| `loop.getSlidersInput().x` | `Handle<number>` |
+| `loop.getSlidersInput().y` | `Handle<number>` |
+| `loop.getSlidersInput().rotation` | `Handle<number>` |
+
+## Three patterns
+
+### Pattern 1 — Synchronous read inside `loop.tick()`
+
+Read `handle.value` directly inside a `loop.tick()` callback to poll the current value once per animation frame. This is the right approach for continuous inputs like the D-pad, where you want to accumulate state (position, velocity) over time.
+
+```typescript app.ts
+import loop from "@theinterfaces-lab/loop";
+
+const dpad = loop.input("dpad");
+const el = document.getElementById("square")!;
+
+let posX = 0;
+let posY = 0;
+const speed = 4;
+
+loop.tick(() => {
+  // dpad.value is always the latest Vec { x, y } — bipolar, −1 to 1 per axis
+  posX += dpad.value.x * speed;
+  posY += dpad.value.y * speed;
+
+  el.style.transform = `translate(${posX}px, ${posY}px)`;
+});
+```
+
+Because `loop.tick()` fires once per RAF frame, `dpad.value.x` reflects the latest sampled axis value at the moment the callback runs.
+
+### Pattern 2 — Push subscription with `on("change")`
+
+Subscribe to value changes with `handle.on("change", fn)`. The callback fires immediately after the handle's internal value changes — for event-driven inputs like the keyboard, this happens synchronously on the DOM `input` event, not on the next RAF tick.
+
+```typescript app.ts
+import loop from "@theinterfaces-lab/loop";
+
+const keyboard = loop.input("keyboard");
+const output = document.getElementById("output")!;
+
+const unsub = keyboard.on("change", (text) => {
+  output.textContent = text.toUpperCase();
+});
+
+// Later, when the component unmounts:
+unsub();
+```
+
+`on()` returns an unsubscribe function. Call it to stop receiving updates. You can register multiple listeners on the same handle; each gets its own independent unsubscribe.
+
+### Pattern 3 — DOM binding with `handle.bind()`
+
+`handle.bind()` is the most concise DOM update path. Pass it a DOM element and an `apply` function: Loop calls `apply` immediately with the current value (so your element is never in an uninitialized state), and then calls it again on every subsequent change.
+
+```typescript app.ts
+import loop from "@theinterfaces-lab/loop";
+
+const keyboard = loop.input("keyboard");
+const output = document.getElementById("output")!;
+
+const unsub = keyboard.bind(output, (text, el) => {
+  (el as HTMLElement).textContent = text;
+});
+
+// Remove the binding when no longer needed:
+unsub();
+```
+
+Calling `bind()` automatically registers the handle with the Loop runtime and starts the RAF loop if it isn't already running.
+
+<Tip>
+  Use `on("change")` for discrete events like keyboard input, where you want to react the instant something changes. Use `handle.value` inside `loop.tick()` for continuous polling like a D-pad or slider, where you need to accumulate state each frame.
+</Tip>
+
+## Return values: unsubscribe functions
+
+Both `on()` and `bind()` return an unsubscribe function that removes the listener or binding when called:
+
+```typescript app.ts
+const stopListening = keyboard.on("change", handler);
+const stopBinding   = keyboard.bind(el, apply);
+
+// Clean up when the UI component is destroyed
+stopListening();
+stopBinding();
+```
+
+You can register multiple independent listeners and bindings on the same handle. Each `on()` and `bind()` call gets its own dedicated unsubscribe — calling one does not affect the others.
+
+## Handles vs. pipelines
+
+Handles and pipelines solve the same problem from different angles:
+
+| | Handle | Pipeline |
+|---|---|---|
+| **Update model** | Pull (`.value`) or push (`on`) | Pull per-frame (RAF) |
+| **Use with** | DOM, three.js, canvas, React state | Multi-stage data processing |
+| **Type checking** | None (you read the value directly) | Validated at `loop.pipe()` wiring |
+| **Best for** | Single inputs wired to a single output | Multi-step transforms, relays |
+
+For simple one-to-one wiring — keyboard text into a `<div>`, D-pad axes into a `translate()` — handles are less code. For anything that needs a transform step, or where you want pipe-level type validation, use `loop.pipe()`.
+
+## The SliderBundle
+
+`loop.getSlidersInput()` returns a `SliderBundle` instead of a single handle. Access each axis as a separate `Handle<number>`:
+
+```typescript app.ts
+import loop from "@theinterfaces-lab/loop";
+
+const sliders = loop.getSlidersInput();
+// sliders.x        → Handle<number>, range 0–1
+// sliders.y        → Handle<number>, range 0–1
+// sliders.rotation → Handle<number>, range 0–1
+
+loop.tick(() => {
+  cube.position.x   = (sliders.x.value - 0.5) * 2;
+  cube.position.y   = (sliders.y.value - 0.5) * 2;
+  cube.rotation.y   = sliders.rotation.value * Math.PI * 2;
+});
+```
+
+Each handle in the bundle is fully independent — you can subscribe to or bind `.x` without touching `.y` or `.rotation`.

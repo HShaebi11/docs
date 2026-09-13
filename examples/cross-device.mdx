@@ -1,0 +1,164 @@
+---
+title: "Example: Cross-Device D-pad with the Relay Layer"
+sidebarTitle: "Cross-Device"
+description: "Publish D-pad input from a phone to a laptop using Loop's relay. Use BroadcastChannel for same-tab testing or WebSocket transport for real cross-device play."
+---
+
+This example runs one Loop instance on a phone (the controller) and another on a laptop (the display). The controller reads the D-pad handle and publishes its `Vec` value to a named room. The display subscribes to that room and uses the arriving values to move a square around an arena. The relay layer handles serialization, deduplication, and reconnection — your application code only sees ordinary handles and `tick` callbacks.
+
+## What this example shows
+
+`loop.relay.room()` creates a named room that two or more browser contexts can join. The room's `publish()` method batches outgoing packets at RAF rate with deduplication so only changed values cross the wire. The room's `subscribe()` method returns a `Handle` that updates whenever a new value arrives. Both sides pick a transport at construction time — `BroadcastChannel` for same-machine testing, `WebSocket` for real cross-device use.
+
+## Choosing a transport
+
+<CardGroup cols={2}>
+  <Card title="BroadcastChannel" icon="broadcast-tower">
+    No server required. Works between tabs on the same machine. Use this for development and same-machine demos. Pass no transport argument to `loop.relay.room()` — it defaults to BroadcastChannel.
+  </Card>
+  <Card title="WebSocket" icon="network-wired">
+    Required for real cross-device use (phone + laptop). Run `npm run relay` on your laptop to start the relay server, then pass the server URL to `loop.relay.websocketTransport()`.
+  </Card>
+</CardGroup>
+
+## Controller side (phone)
+
+The controller gets the D-pad handle and calls `relay.publish()` to push the current `Vec` value to the room each frame. `publish()` deduplicates internally — it only sends a packet if the value changed since the last frame.
+
+```typescript controller.ts
+import loop from "@theinterfaces-lab/loop";
+
+// WebSocket transport for real cross-device use
+const transport = loop.relay.websocketTransport("ws://YOUR_SERVER:8787", "demo");
+const relay     = loop.relay.room("demo", transport);
+
+await relay.connect();
+
+const dpad = loop.input("dpad");
+
+// Publish on every frame — relay deduplicates automatically
+const stopPublish = relay.publish(() => ({
+  kind: "value",
+  value: dpad.value,
+}));
+
+// Clean up when done
+// stopPublish();
+// relay.disconnect();
+```
+
+## Display side (laptop)
+
+The display subscribes to the room and gets back a `Handle<Vec>` that updates whenever the controller sends a new value. Use it inside `loop.tick()` exactly like any local handle.
+
+```typescript display.ts
+import loop from "@theinterfaces-lab/loop";
+
+const transport = loop.relay.websocketTransport("ws://YOUR_SERVER:8787", "demo");
+const relay     = loop.relay.room("demo", transport);
+
+await relay.connect();
+
+// subscribe() returns a Handle<Vec> initialized to { x: 0, y: 0 }
+const remote = relay.subscribe({ x: 0, y: 0 });
+
+const square = document.getElementById("square");
+let posX = 0;
+let posY = 0;
+
+loop.tick(() => {
+  const { x, y } = remote.value;
+
+  posX = Math.max(0, Math.min(368, posX + x * 4));
+  posY = Math.max(0, Math.min(368, posY + y * 4));
+
+  square.style.left = `${posX}px`;
+  square.style.top  = `${posY}px`;
+});
+```
+
+## Same-machine testing with BroadcastChannel
+
+Open the same page in two browser tabs to test without a relay server. Omit the transport argument — `loop.relay.room()` defaults to `broadcastTransport` automatically.
+
+```typescript
+// Tab 1 — controller
+const relay = loop.relay.room("demo"); // BroadcastChannel by default
+await relay.connect();
+
+relay.publish(() => ({ kind: "value", value: dpad.value }));
+
+// Tab 2 — display
+const relay  = loop.relay.room("demo");
+await relay.connect();
+
+const remote = relay.subscribe({ x: 0, y: 0 });
+```
+
+<Tip>
+  For quick testing, open the same page in two browser tabs and use the default BroadcastChannel transport — no relay server needed. Switch to WebSocket only when you need a real phone-to-laptop connection.
+</Tip>
+
+## Monitoring connection status
+
+Call `relay.onStatus(fn)` before `relay.connect()` to receive status updates throughout the session. The callback fires with a `TransportStatus` string any time the connection state changes.
+
+```typescript
+relay.onStatus((status) => {
+  // status: "connecting" | "connected" | "disconnected" | "error"
+  console.log("Relay status:", status);
+
+  if (status === "connected") {
+    statusEl.textContent = "Connected";
+  } else if (status === "error") {
+    statusEl.textContent = "Connection failed — retrying…";
+  }
+});
+
+await relay.connect();
+```
+
+## Full wiring at a glance
+
+<Steps>
+  <Step title="Start the relay server (WebSocket only)">
+    On the machine that will host the server, run:
+    ```bash
+    npm run relay
+    ```
+    The server starts on port 8787. Use your machine's LAN IP address (not `localhost`) when constructing the WebSocket URL on other devices.
+  </Step>
+  <Step title="Create the transport and room">
+    Both devices must use the same room code. The transport type must match on both sides.
+    ```typescript
+    const transport = loop.relay.websocketTransport("ws://192.168.1.5:8787", "demo");
+    const relay     = loop.relay.room("demo", transport);
+    ```
+  </Step>
+  <Step title="Connect and wait">
+    `relay.connect()` returns a promise that resolves once the transport handshake completes. Await it before calling `publish()` or `subscribe()`.
+    ```typescript
+    await relay.connect();
+    ```
+  </Step>
+  <Step title="Publish from the controller">
+    Call `relay.publish(getPacket)` with a function that returns the current packet. The relay polls this function each frame and sends the result only when it differs from the previous value.
+    ```typescript
+    relay.publish(() => ({ kind: "value", value: dpad.value }));
+    ```
+  </Step>
+  <Step title="Subscribe on the display">
+    Call `relay.subscribe(initial)` to get a `Handle` initialized to `initial`. The handle updates whenever a new packet arrives from the controller.
+    ```typescript
+    const remote = relay.subscribe({ x: 0, y: 0 });
+    ```
+  </Step>
+</Steps>
+
+## Relay server
+
+The relay server is a lightweight Node.js WebSocket server included in the Loop package. See the [Relay Server](/relay/relay-server) page for configuration options, environment variables, and deployment notes.
+
+<Note>
+  The relay server is only needed for `WebSocket` transport. BroadcastChannel works entirely in the browser with no server component.
+</Note>

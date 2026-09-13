@@ -1,0 +1,180 @@
+---
+title: "Run the Loop WebSocket Relay Server"
+sidebarTitle: "Relay Server"
+description: "Loop includes a minimal Node.js WebSocket relay server. Run it locally or deploy it to any host to enable cross-device communication between controllers and displays."
+---
+
+Loop ships a lightweight Node.js WebSocket relay server at `scripts/relay-server.mjs`. The server acts as a pure message broker: when a peer sends a packet to a room, the server immediately forwards that packet to every other peer connected to the same room. It never stores state, never inspects packet contents, and never buffers history — it only keeps a live set of open sockets per room. Each room is identified by the URL path the client connects to.
+
+## Starting the server
+
+<Steps>
+  <Step title="Install dependencies">
+    The relay server depends only on the `ws` package, which ships with Loop's development dependencies. Install from the root of the Loop repository:
+
+    ```bash terminal
+    npm install
+    ```
+  </Step>
+
+  <Step title="Start the server">
+    Run the `relay` script from `package.json`:
+
+    ```bash terminal
+    npm run relay
+    # Loop relay listening on ws://0.0.0.0:8787/ROOM_CODE
+    ```
+
+    The server starts on port **8787** by default and logs a single startup line to stdout.
+  </Step>
+
+  <Step title="Verify it is running">
+    Send an HTTP GET request to the server's HTTP endpoint. It returns a plain text status line:
+
+    ```bash terminal
+    curl http://localhost:8787
+    # Loop relay server — connect via WebSocket at /ROOM_CODE
+    ```
+  </Step>
+</Steps>
+
+## Custom port
+
+Pass a port number as the first command-line argument to override the default:
+
+```bash terminal
+node scripts/relay-server.mjs 9000
+# Loop relay listening on ws://0.0.0.0:9000/ROOM_CODE
+```
+
+## Connection URL format
+
+Clients connect to the server using the WebSocket scheme. The room code is the URL path:
+
+```
+ws://HOST:PORT/ROOM_CODE
+```
+
+For example, a room named `"my-room"` on a local server listening on port 8787 uses:
+
+```
+ws://localhost:8787/my-room
+```
+
+Room codes are URL-decoded on the server side, so codes containing spaces or special characters are safe to use as long as the client URL-encodes them (the `websocketTransport` factory handles this automatically).
+
+## Connecting from a client
+
+Pass a `websocketTransport` to `loop.relay.room()` with the server's base URL. The transport appends the room code as a path segment:
+
+```typescript client.ts
+import loop from "@theinterfaces-lab/loop";
+
+const transport = loop.relay.websocketTransport(
+  "ws://localhost:8787",
+  "my-room"
+  // resolves to ws://localhost:8787/my-room
+);
+
+const relay = loop.relay.room("my-room", transport);
+await relay.connect();
+
+// From here, publish/subscribe works exactly like BroadcastChannel
+relay.publish(() => ({ kind: "value", value: loop.input("dpad").value }));
+```
+
+Run the same setup on a second device — phone, tablet, another computer — pointing at the same host, and both peers will exchange packets in real time.
+
+<Note>
+  The relay server is a **pure message broker**. It only broadcasts packets to other connected peers; it never stores any state or interprets packet contents. Rooms are created on first connection and garbage-collected when the last peer disconnects.
+</Note>
+
+## Full controller + display example
+
+<CodeGroup>
+
+```typescript controller.ts
+import loop from "@theinterfaces-lab/loop";
+
+const transport = loop.relay.websocketTransport(
+  "ws://localhost:8787",
+  "game-room"
+);
+const relay = loop.relay.room("game-room", transport);
+
+relay.onStatus((s) => console.log("controller status:", s));
+await relay.connect();
+
+const dpad = loop.input("dpad");
+
+// Publish the dpad Vec every frame; identical values are deduplicated
+relay.publish(() => ({ kind: "value", value: dpad.value }));
+```
+
+```typescript display.ts
+import loop from "@theinterfaces-lab/loop";
+
+const transport = loop.relay.websocketTransport(
+  "ws://localhost:8787",
+  "game-room"
+);
+const relay = loop.relay.room("game-room", transport);
+
+relay.onStatus((s) => console.log("display status:", s));
+await relay.connect();
+
+// Handle<{x:number,y:number}> that updates when packets arrive
+const pos = relay.subscribe({ x: 0, y: 0 });
+
+const square = document.getElementById("square")!;
+let x = 0, y = 0;
+
+loop.tick(() => {
+  x += pos.value.x * 4;
+  y += pos.value.y * 4;
+  square.style.transform = `translate(${x}px, ${y}px)`;
+});
+```
+
+</CodeGroup>
+
+## Deploying to production
+
+<Tip>
+  For production cross-device use, deploy `scripts/relay-server.mjs` to any Node.js host — a VPS, a container, or a platform like Railway or Fly.io. The server has no external dependencies beyond the `ws` package, so a minimal Node.js image is sufficient.
+</Tip>
+
+When deploying behind a reverse proxy (nginx, Caddy, a cloud load balancer), make sure the proxy is configured to forward WebSocket upgrade requests. Most platforms handle this automatically when the connection uses the `ws://` or `wss://` scheme.
+
+For TLS in production, terminate SSL at the proxy layer and point your clients at a `wss://` URL:
+
+```typescript production-client.ts
+import loop from "@theinterfaces-lab/loop";
+
+const transport = loop.relay.websocketTransport(
+  "wss://relay.example.com",
+  "my-room"
+  // resolves to wss://relay.example.com/my-room
+);
+
+const relay = loop.relay.room("my-room", transport);
+await relay.connect();
+```
+
+## Server behavior reference
+
+<Accordion title="Room lifecycle">
+  A room is created in memory the first time a WebSocket client connects to that path. The room is deleted automatically when the last client disconnects, so there is no accumulation of stale state.
+</Accordion>
+
+<Accordion title="Message fanout">
+  Every message a peer sends is forwarded verbatim to all **other** peers in the same room. The sending peer does not receive its own messages back. The server does not parse or validate packet contents.
+</Accordion>
+
+<Accordion title="HTTP health check">
+  An ordinary HTTP GET to any path returns `200 OK` with the plain text body `Loop relay server — connect via WebSocket at /ROOM_CODE`. Use this endpoint for uptime monitoring or load-balancer health checks.
+</Accordion>
+
+<Accordion title="No authentication">
+  The relay server has no built-in authentication or authorization. Any client that knows the server address and room code can join and receive packets. Add authentication at the proxy layer for production deployments that need access control.
+</Accordion>

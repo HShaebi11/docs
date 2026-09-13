@@ -1,0 +1,163 @@
+---
+title: "Example: Real-Time Text Mirroring with Loop"
+sidebarTitle: "Live Text"
+description: "Wire a keyboard input to a live text mirror using Loop's data path. Shows push-based change subscriptions and a full source-transform-sink pipeline."
+---
+
+This example wires a `<textarea>` to a live mirror element using two complementary patterns: a direct push subscription on the keyboard handle, and a full `loop.pipe()` pipeline that routes text through an uppercase transform before writing it to the DOM. Together they prove that both the event-driven and the component-model paths carry data correctly.
+
+## What this example shows
+
+Loop's `"keyboard"` input is a `Handle<string>` that fires a `"change"` event on every keystroke. You can use it directly without building a pipeline — just call `handle.on("change", fn)`. When you need to compose transformations or connect many stages together, reach for `loop.pipe()` instead. This example demonstrates both approaches side by side so you can see the trade-offs.
+
+<CardGroup cols={2}>
+  <Card title="Pattern 1 — Direct subscription" icon="bolt">
+    Call `keyboard.on("change", fn)` to react immediately to every keystroke without RAF scheduling. Best for single-step reactions.
+  </Card>
+  <Card title="Pattern 2 — Full pipeline" icon="arrow-right-arrow-left">
+    Chain `loop.source → loop.transform → loop.sink` with `loop.pipe()`. Best when you need composable, reusable stages with type-checked wiring.
+  </Card>
+</CardGroup>
+
+## Full example
+
+<Steps>
+  <Step title="Get the keyboard handle">
+    Call `loop.input("keyboard")` to obtain a `Handle<string>`. The runtime starts listening for keyboard events automatically — no additional setup needed.
+  </Step>
+  <Step title="Subscribe directly to changes">
+    Use `handle.on("change", fn)` for instant push-based updates. The callback fires synchronously on each keystroke, outside of the RAF loop.
+  </Step>
+  <Step title="Build the pipeline">
+    Define a source, an uppercase transform, and a DOM sink. Wire them together with `loop.pipe()` and call `.start()` to activate the RAF-driven loop.
+  </Step>
+</Steps>
+
+```html index.html
+<!DOCTYPE html>
+<html lang="en">
+<body>
+  <textarea id="input" placeholder="Type here..."></textarea>
+  <div id="mirror"></div>
+
+  <script type="module">
+    import loop from "@theinterfaces-lab/loop";
+
+    const input  = document.getElementById("input");
+    const mirror = document.getElementById("mirror");
+
+    // Pattern 1: direct push subscription — fires on every keystroke
+    const keyboard = loop.input("keyboard");
+    keyboard.on("change", (text) => {
+      mirror.textContent = text.toUpperCase();
+    });
+
+    // Pattern 2: full pipeline — source → uppercase transform → DOM sink
+    const src = loop.source({
+      from: "keyboard",
+      emits: "data",
+      dataType: "text",
+      read: () => ({ kind: "data", type: "text", value: keyboard.value }),
+    });
+
+    const upper = loop.transform({
+      accepts: "data",
+      emits: "data",
+      dataType: "text",
+      process: (p) => {
+        if (p.kind !== "data") return p;
+        return { kind: "data", type: "text", value: String(p.value).toUpperCase() };
+      },
+    });
+
+    const snk = loop.sink({
+      to: "mirror",
+      accepts: "data",
+      dataType: "text",
+      render: (p) => { mirror.textContent = String(p.value); },
+    });
+
+    loop.pipe(src, upper, snk).start();
+  </script>
+</body>
+</html>
+```
+
+## Step-by-step breakdown
+
+<Accordion title="loop.input('keyboard') — getting the handle">
+  `loop.input("keyboard")` returns a singleton `Handle<string>`. Calling it multiple times in the same page returns the same handle, so you never double-register keyboard listeners. The handle's `.value` property always reflects the latest text, and `.on("change", fn)` fires every time the value changes.
+</Accordion>
+
+<Accordion title="keyboard.on('change', fn) — push subscription">
+  The `on("change", fn)` method registers a callback that fires synchronously whenever the handle's value changes. It returns an unsubscribe function you can call later to clean up. Because keyboard events are push-based, this callback runs immediately on each keystroke rather than waiting for the next animation frame.
+
+  ```typescript
+  const off = keyboard.on("change", (text) => {
+    mirror.textContent = text.toUpperCase();
+  });
+
+  // Later, to clean up:
+  off();
+  ```
+</Accordion>
+
+<Accordion title="loop.source() — wrapping the handle in a stage">
+  `loop.source(def)` creates a pipeline stage that reads the current value on each RAF tick. The `from` field names the stage for debugging. The `emits` field declares the packet kind (`"value"`, `"frame"`, or `"data"`). For text, use `"data"` with a `dataType` string so Loop can enforce type consistency across the pipe.
+
+  ```typescript
+  const src = loop.source({
+    from: "keyboard",
+    emits: "data",
+    dataType: "text",
+    read: () => ({ kind: "data", type: "text", value: keyboard.value }),
+  });
+  ```
+</Accordion>
+
+<Accordion title="loop.transform() — the uppercase stage">
+  `loop.transform(def)` creates a pure transformation stage. Declare what kind of packet it `accepts` and what it `emits`. The `process` function receives a `Packet` and must return a `Packet`. Loop checks that adjacent stages have compatible `emits`/`accepts` types at wiring time — before `.start()` is called.
+
+  ```typescript
+  const upper = loop.transform({
+    accepts: "data",
+    emits: "data",
+    dataType: "text",
+    process: (p) => {
+      if (p.kind !== "data") return p;
+      return { kind: "data", type: "text", value: String(p.value).toUpperCase() };
+    },
+  });
+  ```
+</Accordion>
+
+<Accordion title="loop.sink() — writing to the DOM">
+  `loop.sink(def)` creates the terminal stage. Its `render` function receives the packet produced by the previous stage and performs the side effect — in this case, updating `textContent`. The sink never returns a value.
+
+  ```typescript
+  const snk = loop.sink({
+    to: "mirror",
+    accepts: "data",
+    dataType: "text",
+    render: (p) => { mirror.textContent = String(p.value); },
+  });
+  ```
+</Accordion>
+
+<Accordion title="loop.pipe().start() — activating the pipeline">
+  `loop.pipe(src, upper, snk)` validates the wiring and returns a `Pipeline` object. Call `.start()` to register the pipeline with Loop's RAF runtime. The pipeline runs once per animation frame, polling the source and pushing packets through each stage in order.
+
+  ```typescript
+  loop.pipe(src, upper, snk).start();
+  ```
+</Accordion>
+
+## Key points
+
+<Note>
+  The keyboard handle fires push events on every keystroke — no RAF polling needed for text input. Pattern 1 (`handle.on("change", fn)`) reacts instantly without waiting for the next animation frame, making it ideal for UI mirrors and live validation. Pattern 2 runs on the RAF clock, which is appropriate when you want to synchronize text updates with other frame-rate-driven outputs.
+</Note>
+
+<Tip>
+  Both patterns coexist without conflict. The `on("change", fn)` subscriber and the pipeline source both read from the same underlying `Handle<string>`, so the runtime only registers one keyboard listener regardless of how many consumers you attach.
+</Tip>

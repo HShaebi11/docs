@@ -1,0 +1,155 @@
+---
+title: "Cross-Device Relay: Share Inputs Across Tabs and Devices"
+sidebarTitle: "Overview"
+description: "Loop's relay layer lets you publish inputs from one tab or device and subscribe to them on another — swap transports to go from same-machine to cross-network without changing your code."
+---
+
+Loop's relay system connects two sides of a session — a controller and a display, two browser tabs, or a phone and a desktop — by routing normalized packets through a shared room. One peer publishes packets into the room and any number of other peers subscribe to receive them. The transport underneath the room can be a `BroadcastChannel`, a WebSocket connection, or an in-process memory bus; your publish and subscribe code stays identical regardless of which one you pick.
+
+## The room metaphor
+
+Every relay session revolves around a **room code** — an arbitrary string that both sides agree on. When you call `loop.relay.room("my-room")`, Loop returns a `RelayRoom` object, caching it by code so that a second call with the same code returns the same instance. Peers on both sides join the same room code to exchange packets.
+
+<Note>
+  By default, `loop.relay.room()` uses a `BroadcastChannel` transport. This works between tabs and iframes on the **same machine and origin** without any server. To reach a different device, pass a WebSocket transport — see [Transports](/relay/transports).
+</Note>
+
+## Connection lifecycle
+
+Call `room.connect()` before you publish or subscribe. It returns a `Promise` that resolves once the underlying transport is open. You can monitor the connection state at any point with `room.onStatus(fn)`, which fires with a `TransportStatus` string each time it changes.
+
+```typescript relay/overview.mdx — connection + status
+import loop from "@theinterfaces-lab/loop";
+
+const relay = loop.relay.room("my-room");
+
+relay.onStatus((status) => {
+  console.log("relay status:", status);
+  // "idle" | "connecting" | "connected" | "disconnected" | "error"
+});
+
+await relay.connect();
+```
+
+To tear down the connection and remove the room from Loop's internal cache, call `relay.disconnect()`. If you need to reset all rooms at once — for example between tests — call `loop.relay.clear()`.
+
+## Two patterns for sharing data
+
+### Pattern 1 — Simple publish / subscribe
+
+Use `room.publish(getPacket)` and `room.subscribe<T>(initial)` when you want to share a value without building a full pipeline.
+
+`publish` accepts a callback that returns a `Packet` (or `null` to skip). Loop calls it on every animation-frame tick and sends only when the serialized value has changed — identical packets are dropped, so you never flood the transport with redundant messages.
+
+`subscribe<T>(initial)` returns a `Handle<T>` that you read like any other Loop handle. It starts at the `initial` value and updates in place whenever a new packet arrives over the transport.
+
+<Steps>
+  <Step title="Controller side — publish inputs">
+    Read a built-in input and forward it into the room each frame.
+
+    ```typescript controller.ts
+    import loop from "@theinterfaces-lab/loop";
+
+    const dpad = loop.input("dpad");
+    const relay = loop.relay.room("my-room");
+    await relay.connect();
+
+    // Publish the dpad Vec each frame; identical values are deduplicated automatically
+    relay.publish(() => ({ kind: "value", value: dpad.value }));
+    ```
+  </Step>
+
+  <Step title="Display side — subscribe and render">
+    Receive the published packets as a handle and read it inside `loop.tick()`.
+
+    ```typescript display.ts
+    import loop from "@theinterfaces-lab/loop";
+
+    const relay = loop.relay.room("my-room");
+    await relay.connect();
+
+    // Returns a Handle<{x:number,y:number}> that updates when packets arrive
+    const pos = relay.subscribe({ x: 0, y: 0 });
+
+    const square = document.getElementById("square")!;
+    let x = 0, y = 0;
+
+    loop.tick(() => {
+      x += pos.value.x * 4;
+      y += pos.value.y * 4;
+      square.style.transform = `translate(${x}px, ${y}px)`;
+    });
+    ```
+  </Step>
+</Steps>
+
+### Pattern 2 — Pipeline integration
+
+Use `room.outbound(opts)` and `room.inbound(opts)` to wire the relay directly into a `loop.pipe()` pipeline. `outbound` returns a **sink stage** that sends every packet it receives over the transport. `inbound` returns a **source stage** that emits the most recent packet received from the transport.
+
+```typescript pipeline.ts
+import loop from "@theinterfaces-lab/loop";
+
+// ── Controller side ──────────────────────────────────────────────
+const relay = loop.relay.room("my-room");
+await relay.connect();
+
+// Outbound sink: anything flowing through the pipeline is sent over the relay
+loop.pipe(
+  loop.input("dpad"),
+  relay.outbound({ accepts: "value" })
+);
+
+// ── Display side ─────────────────────────────────────────────────
+const relayDisplay = loop.relay.room("my-room");
+await relayDisplay.connect();
+
+// Inbound source: emits the last received packet into the next pipeline stage
+loop.pipe(
+  relayDisplay.inbound({ emits: "value" }),
+  loop.sink({
+    to: "render",
+    accepts: "value",
+    render(packet) {
+      console.log("received:", packet.value);
+    },
+  })
+);
+```
+
+<Tip>
+  Both patterns are composable. You can publish from simple code while the display side uses a full pipeline, or vice versa.
+</Tip>
+
+## Monitoring connection status
+
+`room.onStatus(fn)` returns an unsubscribe function. Store it and call it when you no longer need status updates.
+
+```typescript status.ts
+import loop from "@theinterfaces-lab/loop";
+
+const relay = loop.relay.room("my-room");
+
+const unsub = relay.onStatus((status) => {
+  if (status === "error") {
+    console.error("Relay connection failed");
+  }
+  if (status === "disconnected") {
+    console.warn("Relay disconnected — check your transport");
+  }
+});
+
+await relay.connect();
+
+// Later: stop listening
+unsub();
+```
+
+<CardGroup cols={2}>
+  <Card title="Transports" icon="tower-broadcast" href="/relay/transports">
+    Compare BroadcastChannel, WebSocket, and memory transports and learn how to swap them.
+  </Card>
+  <Card title="Relay Server" icon="server" href="/relay/relay-server">
+    Run the included Node.js WebSocket relay server for real cross-device sessions.
+  </Card>
+</CardGroup>

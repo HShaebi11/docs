@@ -1,0 +1,151 @@
+---
+title: "Installing Loop in Your Project"
+sidebarTitle: "Installation"
+description: "Install Loop via npm, use it directly in the browser as an ES module, or set up TypeScript types — no build step required for quick prototypes."
+---
+
+Loop ships as a pure ES module with full TypeScript declarations included. You can add it to a Node.js project through any package manager, or import it directly in the browser without a bundler. Choose the approach that matches your workflow.
+
+## Package manager install
+
+Install the package from the npm registry:
+
+<CodeGroup>
+  ```bash npm
+  npm install @theinterfaces-lab/loop
+  ```
+
+  ```bash yarn
+  yarn add @theinterfaces-lab/loop
+  ```
+
+  ```bash pnpm
+  pnpm add @theinterfaces-lab/loop
+  ```
+</CodeGroup>
+
+Once installed, import the default export in your source files:
+
+```typescript app.ts
+import loop from "@theinterfaces-lab/loop";
+```
+
+The package entry point is `dist/index.js` (ESM). TypeScript types are exported from `dist/index.d.ts` and resolved automatically by any modern TypeScript toolchain — no `@types/` package needed.
+
+## Direct browser usage (no build step)
+
+Loop works as a plain `<script type="module">` in any modern browser. This is ideal for prototypes, demos, and learning without configuring a bundler.
+
+**From a CDN:**
+
+```html index.html
+<!DOCTYPE html>
+<html lang="en">
+  <body>
+    <script type="module">
+      import loop from "https://esm.sh/@theinterfaces-lab/loop";
+
+      const dpad = loop.input("dpad");
+
+      loop.tick(() => {
+        console.log(dpad.value.x, dpad.value.y);
+      });
+    </script>
+  </body>
+</html>
+```
+
+**With an import map (recommended for multi-file projects):**
+
+An import map lets you use bare specifiers (`"@theinterfaces-lab/loop"`) in multiple modules without repeating the full URL in each file.
+
+```html index.html
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <script type="importmap">
+      {
+        "imports": {
+          "@theinterfaces-lab/loop": "https://esm.sh/@theinterfaces-lab/loop"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
+```
+
+```javascript app.js
+import loop from "@theinterfaces-lab/loop";
+
+const keyboard = loop.input("keyboard");
+keyboard.on("change", (text) => {
+  document.getElementById("output").textContent = text;
+});
+```
+
+<Note>
+  Import maps require a modern browser (Chrome 89+, Firefox 108+, Safari 16.4+). For older targets, use a bundler such as Vite, esbuild, or Rollup with the npm package instead.
+</Note>
+
+## TypeScript setup
+
+Loop is written in TypeScript and ships declarations at `dist/index.d.ts`. No additional configuration is required beyond importing the package. All public types are exported from the main entry point:
+
+```typescript types.ts
+import type {
+  Packet,
+  Vec,
+  Kind,
+  Handle,
+  Pipeline,
+  SourceDef,
+  TransformDef,
+  SinkDef,
+  ComponentDef,
+  Transport,
+  TransportStatus,
+  RelayRoom,
+} from "@theinterfaces-lab/loop";
+```
+
+Set your TypeScript `target` to `ES2022` or later in `tsconfig.json` to ensure compatibility with the ES module output and modern browser APIs Loop depends on:
+
+```json tsconfig.json
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true
+  }
+}
+```
+
+<Tip>
+  If you see `Cannot find module '@theinterfaces-lab/loop'` errors, confirm that `moduleResolution` is set to `"bundler"`, `"node16"`, or `"nodenext"` — these modes correctly resolve the `exports` field in `package.json`.
+</Tip>
+
+## Browser compatibility
+
+Loop relies on the following browser APIs. All are available in every modern browser released after 2021.
+
+| API | Used by | Notes |
+|-----|---------|-------|
+| `requestAnimationFrame` | RAF-driven runtime (`loop.tick`) | Available in all modern browsers and Node.js with a polyfill |
+| `BroadcastChannel` | Default relay transport | Same-origin tabs and windows |
+| `navigator.getGamepads()` | `"dpad"` and `"sliders"` inputs | Requires a user gesture before the first call |
+| `navigator.requestMIDIAccess()` | `"sliders"` input (MIDI path) | Chrome and Edge; Safari requires the WebMidi API extension |
+
+<Warning>
+  `navigator.requestMIDIAccess()` is not yet available in Firefox. The `"sliders"` input falls back to gamepad axes if MIDI is unavailable, so the rest of Loop works normally on Firefox.
+</Warning>
+
+## Requirements summary
+
+- **Browser:** Chrome 94+, Edge 94+, Safari 16+, Firefox 109+ (MIDI excluded)
+- **Node.js:** 18+ for relay server usage (`npm run relay`). The client library requires a `requestAnimationFrame` polyfill in Node.js environments.
+- **TypeScript:** 5.0+ recommended. Minimum 4.7 with `"moduleResolution": "node16"`.
+- **Build target:** ES2022 or later.

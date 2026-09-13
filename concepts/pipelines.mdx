@@ -1,0 +1,187 @@
+---
+title: "Pipelines: Wire Components Together with Type Safety"
+sidebarTitle: "Pipelines"
+description: "Loop pipelines connect sources, transforms, and sinks into a type-safe chain. Mismatched packet kinds throw at wiring time, giving you early error detection before runtime."
+---
+
+A **pipeline** is an ordered chain of stages — at least one source, any number of transforms, and a sink — that Loop runs as a unit on every animation frame. You build a pipeline by passing `Stage` objects to `loop.pipe()`. Before the pipeline is registered with the runtime, Loop validates every adjacent stage pair and throws if any wiring is wrong. You find out about mistakes immediately, at the `loop.pipe()` call, not buried in a runtime stack trace.
+
+## `loop.pipe(...stages)`
+
+Pass any number of `Stage` objects returned by `loop.source()`, `loop.transform()`, or `loop.sink()`. `loop.pipe()` walks each adjacent pair, runs the type check, and returns a `Pipeline` object.
+
+```typescript app.ts
+import loop from "@theinterfaces-lab/loop";
+
+const src = loop.source({
+  from: "keyboard",
+  emits: "data",
+  dataType: "text",
+  read: () => ({ kind: "data", type: "text", value: loop.input("keyboard").value }),
+});
+
+const upper = loop.transform({
+  accepts: "data",
+  emits: "data",
+  dataType: "text",
+  process: (p) => ({
+    kind: "data",
+    type: "text",
+    value: String(p.kind === "data" ? p.value : "").toUpperCase(),
+  }),
+});
+
+const snk = loop.sink({
+  to: "output",
+  accepts: "data",
+  dataType: "text",
+  render: (p) => {
+    if (p.kind === "data") el.textContent = String(p.value);
+  },
+});
+
+// Wiring is validated here — throws immediately on a mismatch
+const pipeline = loop.pipe(src, upper, snk);
+
+// Register with the RAF runtime
+pipeline.start();
+```
+
+<Note>
+  Pipelines run once per RAF frame. Each tick, the source's `read()` is called first. If it returns `null`, the frame is skipped entirely. Otherwise the packet passes through each transform's `process()` in order, and the sink's `render()` receives the final packet.
+</Note>
+
+## `loop.connect(a, b)`
+
+`loop.connect()` is a shorthand for a two-stage pipe. Use it when you have a source that feeds directly into a sink with no transforms in between:
+
+```typescript app.ts
+// Equivalent to loop.pipe(src, snk)
+const pipeline = loop.connect(src, snk);
+pipeline.start();
+```
+
+`connect()` performs the same type-check as `pipe()` and returns the same `Pipeline` object.
+
+## The `Pipeline` object
+
+<ResponseField name="stages" type="Stage[]">
+  The ordered array of stages that was passed to `loop.pipe()`. Read-only after construction.
+</ResponseField>
+
+<ResponseField name="start()" type="() => void">
+  Registers the pipeline with the runtime. The runtime starts its RAF loop automatically if it isn't already running. Calling `start()` twice on the same pipeline is safe — the runtime deduplicates it.
+</ResponseField>
+
+<ResponseField name="stop()" type="() => void">
+  Removes the pipeline from the runtime. The pipeline's stages are no longer called each frame. The runtime continues running for any other active pipelines or tick callbacks.
+</ResponseField>
+
+```typescript app.ts
+const pipeline = loop.pipe(src, upper, snk);
+
+pipeline.start(); // starts running on every RAF frame
+
+// later, when you no longer need the pipeline:
+pipeline.stop();
+```
+
+## Type checking in detail
+
+Loop validates every adjacent stage pair by calling `checkAdjacent(a, b)` internally. Two conditions must hold for each pair:
+
+**1. Kind compatibility** — `a.emits` must appear in `b.accepts`. If it doesn't, Loop throws:
+
+```
+Type mismatch: "keyboard" emits "data" but "value-sink" accepts [value]
+```
+
+```typescript
+// This throws at loop.pipe() call time — never reaches runtime
+loop.pipe(
+  loop.source({ from: "keyboard", emits: "data", read: () => null }),
+  loop.sink({ to: "value-sink", accepts: "value", render: () => {} }),
+);
+```
+
+**2. Data type compatibility** — when both stages have a `dataType` string and the kind is `"data"`, the strings must match. If they don't, Loop throws:
+
+```
+Data type mismatch: "src" emits data:"text" but "snk" expects data:"event"
+```
+
+```typescript
+// This also throws at loop.pipe() call time
+loop.pipe(
+  loop.source({ from: "src", emits: "data", dataType: "text", read: () => null }),
+  loop.sink({ to: "snk", accepts: "data", dataType: "event", render: () => {} }),
+);
+```
+
+The check only fires when **both** stages declare `dataType`. If either stage omits `dataType`, the data type check is skipped — this lets you write generic transforms that accept any `data` packet without being locked to a specific type string.
+
+## A longer pipeline
+
+Pipelines can have as many transform stages as you need. Each transform receives the output of the previous one:
+
+```typescript app.ts
+import loop from "@theinterfaces-lab/loop";
+
+const keyboard = loop.input("keyboard");
+
+const src = loop.source({
+  from: "keyboard",
+  emits: "data",
+  dataType: "text",
+  read: () => ({ kind: "data", type: "text", value: keyboard.value }),
+});
+
+const trim = loop.transform({
+  accepts: "data",
+  emits: "data",
+  dataType: "text",
+  process: (p) => ({
+    kind: "data", type: "text",
+    value: String(p.kind === "data" ? p.value : "").trim(),
+  }),
+});
+
+const upper = loop.transform({
+  accepts: "data",
+  emits: "data",
+  dataType: "text",
+  process: (p) => ({
+    kind: "data", type: "text",
+    value: String(p.kind === "data" ? p.value : "").toUpperCase(),
+  }),
+});
+
+const snk = loop.sink({
+  to: "display",
+  accepts: "data",
+  dataType: "text",
+  render: (p) => {
+    if (p.kind === "data") display.textContent = String(p.value);
+  },
+});
+
+// All four stages are validated in a single call
+loop.pipe(src, trim, upper, snk).start();
+```
+
+## Starting and stopping pipelines
+
+<Steps>
+  <Step title="Create the stages">
+    Call `loop.source()`, `loop.transform()`, and `loop.sink()` to build your `Stage` objects. No side effects happen yet.
+  </Step>
+  <Step title="Wire the pipeline">
+    Call `loop.pipe(...stages)`. Type checking runs immediately. If everything is valid, you receive a `Pipeline` object. If not, an error is thrown at this line.
+  </Step>
+  <Step title="Start the pipeline">
+    Call `pipeline.start()`. The pipeline is added to the runtime's set of active pipelines and begins running on every RAF frame.
+  </Step>
+  <Step title="Stop when done">
+    Call `pipeline.stop()` to unregister the pipeline. The RAF loop continues for any other pipelines or tick functions that are still active.
+  </Step>
+</Steps>

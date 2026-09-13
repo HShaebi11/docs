@@ -1,72 +1,103 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "mint",
-  "name": "Mintlify Starter Kit",
-  "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
-  },
-  "favicon": "/favicon.svg",
-  "navigation": {
-    "pages": [
-      {
-        "group": "Getting Started",
-        "pages": [
-          "index",
-          "quickstart"
-        ]
-      }
-    ],
-    "global": {
-      "anchors": [
-        {
-          "anchor": "Documentation",
-          "href": "https://mintlify.com/docs",
-          "icon": "book-open-cover"
-        },
-        {
-          "anchor": "Blog",
-          "href": "https://mintlify.com/blog",
-          "icon": "newspaper"
-        }
-      ]
-    }
-  },
+  "name": "Interface Tech",
+  "theme": "luma",
   "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
+    "light": "https://media.brand.dev/ad80c252-c0b7-4b5c-b6b4-bd9e716dbab5.png",
+    "dark": "https://media.brand.dev/ad80c252-c0b7-4b5c-b6b4-bd9e716dbab5.png"
+  },
+  "favicon": "https://media.brand.dev/0f7115ca-aa34-420f-926b-896d354a331a.png",
+  "colors": {
+    "primary": "#007bff",
+    "light": "#257194",
+    "dark": "#84bfc1"
   },
   "navbar": {
-    "links": [
-      {
-        "label": "Support",
-        "href": "mailto:hi@mintlify.com"
-      }
-    ],
     "primary": {
-      "type": "button",
-      "label": "Dashboard",
-      "href": "https://app.mintlify.com"
+      "type": "github",
+      "href": "https://github.com/interfaces-technology/loop"
     }
   },
-  "contextual": {
-    "options": [
-      "copy",
-      "view",
-      "chatgpt",
-      "claude",
-      "perplexity",
-      "mcp",
-      "cursor",
-      "vscode"
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/packets",
+              "concepts/components",
+              "concepts/handles",
+              "concepts/pipelines",
+              "concepts/runtime"
+            ]
+          },
+          {
+            "group": "Input Sources",
+            "pages": [
+              "inputs/overview",
+              "inputs/keyboard",
+              "inputs/dpad",
+              "inputs/sliders",
+              "inputs/midi"
+            ]
+          },
+          {
+            "group": "Cross-Device Relay",
+            "pages": [
+              "relay/overview",
+              "relay/transports",
+              "relay/relay-server"
+            ]
+          },
+          {
+            "group": "Examples",
+            "pages": [
+              "examples/live-text",
+              "examples/dpad-square",
+              "examples/sliders-cube",
+              "examples/cross-device"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Loop API",
+            "pages": [
+              "api/overview",
+              "api/components",
+              "api/inputs-outputs",
+              "api/pipe",
+              "api/tick"
+            ]
+          },
+          {
+            "group": "Relay API",
+            "pages": [
+              "api/relay-room",
+              "api/transports"
+            ]
+          },
+          {
+            "group": "Types",
+            "pages": [
+              "api/types"
+            ]
+          }
+        ]
+      }
     ]
-  },
-  "footer": {
-    "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://linkedin.com/company/mintlify"
-    }
   }
 }

@@ -1,0 +1,156 @@
+---
+title: "Loop Relay Transports: BroadcastChannel and WebSocket"
+sidebarTitle: "Transports"
+description: "Choose BroadcastChannel for same-machine multi-tab communication, or WebSocket for real cross-device relay. Swap transports without changing your publish or subscribe code."
+---
+
+Every `RelayRoom` delegates the actual wire communication to a **transport** — an object that knows how to open a connection, send serialized packets, and fire callbacks when packets arrive. Loop ships with three transports: `BroadcastChannel` for same-machine tabs, `WebSocket` for cross-device sessions, and an in-process `memory` transport for testing. Your `publish` / `subscribe` and pipeline code never touches the transport directly, so you can swap from local to cross-device by changing a single line.
+
+## The Transport interface
+
+All three implementations satisfy the same `Transport` interface exported from `@theinterfaces-lab/loop`:
+
+<ResponseField name="status" type="TransportStatus">
+  The current connection state of the transport. One of `"idle"`, `"connecting"`, `"connected"`, `"disconnected"`, or `"error"`.
+</ResponseField>
+
+<ResponseField name="connect()" type="Promise<void>">
+  Opens the connection. Resolves when the transport is ready to send and receive packets. Throws if the connection fails.
+</ResponseField>
+
+<ResponseField name="disconnect()" type="void">
+  Closes the connection and moves status to `"disconnected"`.
+</ResponseField>
+
+<ResponseField name="send(packet)" type="void">
+  Serializes and sends a `Packet` to all peers in the room. Has no effect if the transport is not `"connected"`.
+</ResponseField>
+
+<ResponseField name="onPacket(fn)" type="() => void">
+  Registers a callback that fires with a deserialized `Packet` whenever one arrives. Returns an unsubscribe function.
+</ResponseField>
+
+<ResponseField name="onStatus(fn)" type="() => void">
+  Registers a callback that fires with each new `TransportStatus` value. Returns an unsubscribe function.
+</ResponseField>
+
+## TransportStatus values
+
+```typescript types.ts
+export type TransportStatus =
+  | "idle"        // transport created, connect() not yet called
+  | "connecting"  // connect() called, handshake in progress
+  | "connected"   // ready to send and receive
+  | "disconnected"// disconnect() called or connection closed cleanly
+  | "error";      // connection attempt failed or unexpected close
+```
+
+## BroadcastChannel (default)
+
+The `BroadcastChannel` transport uses the browser's built-in `BroadcastChannel` API to exchange messages between any number of tabs or iframes that share the same origin and machine. No server is needed and no configuration is required — this is the transport `loop.relay.room()` creates automatically when you don't provide one.
+
+Loop prefixes every channel name with `loop-relay:` to avoid collisions with other `BroadcastChannel` users on the page.
+
+<Note>
+  `BroadcastChannel` is scoped to the **same machine and same origin**. It cannot reach a different device or a different hostname. For cross-device communication, use the WebSocket transport.
+</Note>
+
+```typescript broadcast-default.ts
+import loop from "@theinterfaces-lab/loop";
+
+// BroadcastChannel is used automatically — no transport argument needed
+const relay = loop.relay.room("my-room");
+await relay.connect();
+
+relay.publish(() => ({ kind: "value", value: loop.input("dpad").value }));
+```
+
+If you need to pass the transport explicitly — for instance, to combine it with a custom room setup — create it with `loop.relay.broadcastTransport`:
+
+```typescript broadcast-explicit.ts
+import loop from "@theinterfaces-lab/loop";
+
+const transport = loop.relay.broadcastTransport("my-room");
+const relay = loop.relay.room("my-room", transport);
+await relay.connect();
+```
+
+## WebSocket
+
+The `WebSocket` transport connects to a remote relay server over a persistent WebSocket connection, enabling real cross-device communication across any network.
+
+Build the transport with `loop.relay.websocketTransport(url, roomCode)`. The room code is appended to the base URL as a path segment, or substituted in place of a `{room}` template if one is present in the URL:
+
+| `url` argument                        | Resolved endpoint                        |
+| ------------------------------------- | ---------------------------------------- |
+| `"ws://localhost:8787"`               | `ws://localhost:8787/my-room`            |
+| `"ws://relay.example.com/"`           | `ws://relay.example.com/my-room`         |
+| `"ws://relay.example.com/{room}/ws"` | `ws://relay.example.com/my-room/ws`      |
+
+```typescript websocket.ts
+import loop from "@theinterfaces-lab/loop";
+
+const transport = loop.relay.websocketTransport(
+  "ws://localhost:8787",
+  "my-room"
+);
+
+const relay = loop.relay.room("my-room", transport);
+await relay.connect();
+
+// publish / subscribe code is identical to BroadcastChannel
+relay.publish(() => ({ kind: "value", value: loop.input("dpad").value }));
+```
+
+<Tip>
+  To switch an existing project from same-machine to cross-device, change only the `loop.relay.room()` call to pass a WebSocket transport. Every downstream `publish`, `subscribe`, and pipeline call remains unchanged.
+</Tip>
+
+The `connect()` call resolves when the WebSocket `open` event fires, and rejects if the connection fails or closes before opening. Monitor the connection state with `relay.onStatus(fn)` and handle `"error"` and `"disconnected"` states in production code.
+
+## Memory (testing)
+
+The `memory` transport runs entirely in-process: calling `send()` synchronously invokes all registered `onPacket` listeners in the same JavaScript environment, with no I/O. It is useful for unit tests and integration tests that need to verify packet flow without a browser or server.
+
+`memoryTransport` caches instances by room code — two calls with the same code return the same transport object, so a sender and a receiver in the same test process share the same instance.
+
+```typescript memory-test.ts
+import loop from "@theinterfaces-lab/loop";
+
+const transport = loop.relay.memoryTransport("test-room");
+const relay = loop.relay.room("test-room", transport);
+await relay.connect();
+
+const received: number[] = [];
+const handle = relay.subscribe(0);
+transport.onPacket((p) => {
+  if (p.kind === "value" && typeof p.value === "number") {
+    received.push(p.value);
+  }
+});
+
+transport.send({ kind: "value", value: 42 });
+// received === [42]
+```
+
+## Packet serialization constraints
+
+Packets are serialized to JSON before transmission. This means only `value` and `data` packets can travel over a relay transport.
+
+<Warning>
+  `frame` packets (containing `ImageData`) **cannot be serialized** by the relay transports and will throw at send time. If you need to relay visual data, encode it as a `data` packet with a base-64 payload.
+</Warning>
+
+## Comparison
+
+<CardGroup cols={3}>
+  <Card title="BroadcastChannel" icon="window-restore">
+    Same machine, same origin only. No server required. Created automatically by `loop.relay.room()`.
+  </Card>
+  <Card title="WebSocket" icon="network-wired">
+    Any device, any network. Requires a running relay server. Pass via `loop.relay.websocketTransport()`.
+  </Card>
+  <Card title="Memory" icon="flask">
+    In-process only. Synchronous delivery. Ideal for tests. Pass via `loop.relay.memoryTransport()`.
+  </Card>
+</CardGroup>
