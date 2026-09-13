@@ -1,7 +1,7 @@
 ---
-title: "MIDI Control Change Input in Loop"
+title: "Using MIDI Control Change Input in Loop Applications"
 sidebarTitle: "MIDI"
-description: "Loop maps MIDI Control Change messages to the sliders bundle automatically. Connect a MIDI controller and the first three CC numbers drive x, y, and rotation handles at 0–1."
+description: "Loop auto-maps MIDI Control Change messages to the sliders bundle. The first three CC numbers seen drive x, y, and rotation handles, normalized to 0–1."
 ---
 
 Loop integrates MIDI Control Change (CC) messages directly into the sliders bundle. When CC messages arrive from any connected MIDI device, Loop captures the first three distinct CC numbers it sees, sorts them numerically, and maps them to the `x`, `y`, and `rotation` handles. CC values (0–127) are normalized to 0–1 before they reach your code. No manual setup, no event parsing — just call `loop.getSlidersInput()` and MIDI initializes itself.
@@ -38,7 +38,7 @@ Loop discovers CC numbers dynamically rather than requiring you to configure the
     All seen CC numbers are sorted ascending. The lowest-numbered CC maps to `x`, the second to `y`, the third to `rotation`.
   </Step>
   <Step title="Update handles">
-    The three slider handles are updated with `_setValue()`, triggering any `change` subscribers and bindings.
+    The three slider handles (`x`, `y`, `rotation`) are updated with the normalized values, triggering any `change` subscribers and bindings.
   </Step>
 </Steps>
 

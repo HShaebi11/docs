@@ -1,5 +1,5 @@
 ---
-title: "Installing Loop in Your Project"
+title: "Installing Loop: npm, Browser Module, and TypeScript"
 sidebarTitle: "Installation"
 description: "Install Loop via npm, use it directly in the browser as an ES module, or set up TypeScript types — no build step required for quick prototypes."
 ---
@@ -136,11 +136,11 @@ Loop relies on the following browser APIs. All are available in every modern bro
 |-----|---------|-------|
 | `requestAnimationFrame` | RAF-driven runtime (`loop.tick`) | Available in all modern browsers and Node.js with a polyfill |
 | `BroadcastChannel` | Default relay transport | Same-origin tabs and windows |
-| `navigator.getGamepads()` | `"dpad"` and `"sliders"` inputs | Requires a user gesture before the first call |
-| `navigator.requestMIDIAccess()` | `"sliders"` input (MIDI path) | Chrome and Edge; Safari requires the WebMidi API extension |
+| `navigator.getGamepads()` | `"dpad"` input and the slider bundle (`loop.getSlidersInput()`) | Requires a user gesture before the first call |
+| `navigator.requestMIDIAccess()` | Slider bundle — `loop.getSlidersInput()` (MIDI path) | Chrome and Edge; Safari requires the WebMidi API extension |
 
 <Warning>
-  `navigator.requestMIDIAccess()` is not yet available in Firefox. The `"sliders"` input falls back to gamepad axes if MIDI is unavailable, so the rest of Loop works normally on Firefox.
+  `navigator.requestMIDIAccess()` is not yet available in Firefox. The slider bundle (`loop.getSlidersInput()`) falls back to gamepad axes if MIDI is unavailable, so the rest of Loop works normally on Firefox.
 </Warning>
 
 ## Requirements summary

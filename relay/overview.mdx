@@ -1,7 +1,7 @@
 ---
 title: "Cross-Device Relay: Share Inputs Across Tabs and Devices"
 sidebarTitle: "Overview"
-description: "Loop's relay layer lets you publish inputs from one tab or device and subscribe to them on another — swap transports to go from same-machine to cross-network without changing your code."
+description: "Loop's relay links browser tabs or physical devices through a shared room. Publish from one peer, subscribe on another — change transport with one line."
 ---
 
 Loop's relay system connects two sides of a session — a controller and a display, two browser tabs, or a phone and a desktop — by routing normalized packets through a shared room. One peer publishes packets into the room and any number of other peers subscribe to receive them. The transport underneath the room can be a `BroadcastChannel`, a WebSocket connection, or an in-process memory bus; your publish and subscribe code stays identical regardless of which one you pick.
@@ -39,9 +39,9 @@ To tear down the connection and remove the room from Loop's internal cache, call
 
 Use `room.publish(getPacket)` and `room.subscribe<T>(initial)` when you want to share a value without building a full pipeline.
 
-`publish` accepts a callback that returns a `Packet` (or `null` to skip). Loop calls it on every animation-frame tick and sends only when the serialized value has changed — identical packets are dropped, so you never flood the transport with redundant messages.
+`publish` accepts a callback that returns a `Packet` (or `null` to skip). Loop calls it on every animation-frame tick and sends only when the serialized value has changed — identical packets are dropped, so you never flood the transport with redundant messages. `publish` returns an unsubscribe function; call it to stop publishing.
 
-`subscribe<T>(initial)` returns a `Handle<T>` that you read like any other Loop handle. It starts at the `initial` value and updates in place whenever a new packet arrives over the transport.
+`subscribe<T>(initial)` returns a `Handle<T>` that you read like any other Loop handle. It starts at the `initial` value and updates in place whenever a new packet arrives over the transport. `T` must be a `number` or a `Vec` (`{ x, y }`) — these are the only value types the relay can carry.
 
 <Steps>
   <Step title="Controller side — publish inputs">
@@ -150,6 +150,6 @@ unsub();
     Compare BroadcastChannel, WebSocket, and memory transports and learn how to swap them.
   </Card>
   <Card title="Relay Server" icon="server" href="/relay/relay-server">
-    Run the included Node.js WebSocket relay server for real cross-device sessions.
+    Run the Node.js WebSocket relay server for real cross-device sessions.
   </Card>
 </CardGroup>

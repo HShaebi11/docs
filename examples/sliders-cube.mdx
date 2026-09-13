@@ -54,7 +54,9 @@ The snippet below focuses on the Loop wiring. The Three.js scene setup (renderer
     // getSlidersInput() initializes MIDI automatically
     const { x, y, rotation } = loop.getSlidersInput();
 
-    // On-screen sliders as fallback: push normalized values into each handle
+    // On-screen sliders as fallback: push normalized values into each handle.
+    // NOTE: _setValue is an internal API (indicated by the underscore prefix).
+    // It is used here for demonstration only — a future public write API is planned.
     function bindOnScreenSlider(el, handle) {
       el.addEventListener("input", () => {
         handle._setValue(Number(el.value) / 100);
@@ -104,7 +106,11 @@ The snippet below focuses on the Loop wiring. The Three.js scene setup (renderer
 </Accordion>
 
 <Accordion title="handle._setValue() — pushing on-screen slider values">
-  The `Handle` interface exposes `_setValue(v)` as the low-level write path. Call it from your on-screen slider's `"input"` event to feed a normalized value back into the handle. After calling `_setValue`, call `loop.setSlidersActiveDevice("on-screen")` so the device label reflects the correct source.
+  <Warning>
+    `_setValue` is an **internal API** — the leading underscore signals that it is not part of the stable public contract and may change in a future release. It is used in this example to feed on-screen slider values back into the handle bundle. A first-class public write API is planned for a future release.
+  </Warning>
+
+  `_setValue(v)` is the low-level write path exposed on `Handle`. Call it from your on-screen slider's `"input"` event to feed a normalized value back into the handle. After calling `_setValue`, call `loop.setSlidersActiveDevice("on-screen")` so the device label reflects the correct source.
 
   ```typescript
   sliderX.addEventListener("input", () => {

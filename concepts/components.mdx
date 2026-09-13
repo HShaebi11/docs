@@ -1,7 +1,7 @@
 ---
-title: "Loop Components: Sources, Transforms, and Sinks"
+title: "Loop Components: Sources, Transforms, and Sinks Explained"
 sidebarTitle: "Components"
-description: "Every stage in a Loop pipeline is a component — a source reads data, a transform processes it, and a sink renders the result. All three share the same shape."
+description: "Loop pipeline stages are components — a source reads, a transform processes, a sink renders. Build all three with loop.source(), transform(), and sink()."
 ---
 
 Loop has one primitive: the **component**. A component is a plain object that declares which packet kind it speaks and provides exactly one method — `read`, `process`, or `render` — depending on its role in the pipeline. Sources produce packets, transforms reshape them, and sinks consume them. All three are created by the same factory functions and all three return a `Stage` object that `loop.pipe()` understands.

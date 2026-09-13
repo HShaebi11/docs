@@ -125,7 +125,7 @@ Creates or retrieves a named output `Stage`. The returned stage is a valid sink 
 **Returns:** `Stage` (a sink that accepts `"value"`, `"frame"`, and `"data"`)
 
 <Warning>
-  `loop.output()` currently returns a stub. If the pipeline runs and reaches this stage's `render` function, it throws `Output "name" has no hardware sink registered (coming in slice 4+)`. Hardware output sinks are not yet implemented.
+  `loop.output()` currently returns a stub. If the pipeline runs and the returned stage's `render` function is ever called, it throws an error — hardware output sinks are not yet implemented. Do not wire an output stage into a running pipeline.
 </Warning>
 
 ---

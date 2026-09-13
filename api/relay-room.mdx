@@ -1,7 +1,7 @@
 ---
 title: "RelayRoom API: Publish, Subscribe, and Pipeline Integration"
 sidebarTitle: "RelayRoom"
-description: "Reference for the RelayRoom object — connect to a room, publish packets, subscribe to incoming packets, or wire the relay into a Loop pipeline using outbound and inbound stages."
+description: "Reference for RelayRoom — connect, publish packets, subscribe to incoming data, and wire the relay into a Loop pipeline as outbound or inbound stages."
 ---
 
 The `RelayRoom` is the central object for cross-context communication in Loop. Obtain one by calling `loop.relay.room(code)`, then use its methods to push packets to peers, receive packets from them, or slot the relay directly into a `loop.pipe()` pipeline as a source or sink stage. All rooms with the same code automatically communicate with each other through the chosen transport.

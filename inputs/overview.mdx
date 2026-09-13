@@ -1,7 +1,7 @@
 ---
 title: "Loop Input Sources: Keyboard, D-pad, Sliders, and MIDI"
 sidebarTitle: "Overview"
-description: "Loop provides built-in input sources for keyboard text, directional axes, analog sliders, and MIDI CC — each returning a typed Handle you read in your tick loop or subscribe to."
+description: "Loop ships four built-in input sources — keyboard, D-pad, sliders, and MIDI CC — each returning a typed Handle to poll or subscribe to."
 ---
 
 Inputs are the left end of the wire. Each input source produces typed packets every frame (or on change), and you access them through a `Handle` — a lightweight object that holds the latest value and lets you subscribe to updates. Loop ships four built-in input sources that cover the most common browser interaction patterns without any additional dependencies.

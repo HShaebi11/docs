@@ -1,7 +1,7 @@
 ---
-title: "Loop Relay Transports: BroadcastChannel and WebSocket"
+title: "Loop Relay Transports: BroadcastChannel, WebSocket, Memory"
 sidebarTitle: "Transports"
-description: "Choose BroadcastChannel for same-machine multi-tab communication, or WebSocket for real cross-device relay. Swap transports without changing your publish or subscribe code."
+description: "Loop's three relay transports: BroadcastChannel for same-machine tabs, WebSocket for cross-device, and memory for tests. Swap with one line of code."
 ---
 
 Every `RelayRoom` delegates the actual wire communication to a **transport** — an object that knows how to open a connection, send serialized packets, and fire callbacks when packets arrive. Loop ships with three transports: `BroadcastChannel` for same-machine tabs, `WebSocket` for cross-device sessions, and an in-process `memory` transport for testing. Your `publish` / `subscribe` and pipeline code never touches the transport directly, so you can swap from local to cross-device by changing a single line.
@@ -135,10 +135,10 @@ transport.send({ kind: "value", value: 42 });
 
 ## Packet serialization constraints
 
-Packets are serialized to JSON before transmission. This means only `value` and `data` packets can travel over a relay transport.
+The `BroadcastChannel` and `WebSocket` transports serialize packets to JSON before sending them. This means only `value` and `data` packets can travel over those transports.
 
 <Warning>
-  `frame` packets (containing `ImageData`) **cannot be serialized** by the relay transports and will throw at send time. If you need to relay visual data, encode it as a `data` packet with a base-64 payload.
+  `frame` packets (containing `ImageData`) **cannot be serialized** and will throw when passed to the `BroadcastChannel` or `WebSocket` transport's `send()` method. If you need to relay visual data, encode it as a `data` packet with a base-64 payload. The in-process `memory` transport passes packet objects directly and does not have this restriction.
 </Warning>
 
 ## Comparison

@@ -1,7 +1,7 @@
 ---
-title: "Loop TypeScript Types Reference"
+title: "Loop TypeScript Types: Packet, Handle, Pipeline, and More"
 sidebarTitle: "Types"
-description: "Complete TypeScript type reference for Loop — Packet, Vec, Kind, Handle, Stage, Pipeline, SliderBundle, Transport, TransportStatus, and component definition interfaces."
+description: "TypeScript type reference for Loop — Packet, Vec, Handle, Stage, Pipeline, SliderBundle, Transport, TransportStatus, and component definition types."
 ---
 
 Loop ships a focused set of TypeScript types that form the contract between every part of the library. All types listed here are exported from `@theinterfaces-lab/loop` and are fully available in any TypeScript project. If you use Loop via a `<script type="module">` tag without a build step, JSDoc inference provides equivalent editor support in JavaScript.
@@ -63,7 +63,7 @@ A reactive reference to a value that updates each animation frame. Handles are r
 interface Handle<T = number | Vec> {
   readonly value: T;
   on(event: "change", fn: (v: T) => void): () => void;
-  bind(el: Element, apply: (v: T) => void): () => void;
+  bind(el: unknown, apply: (v: T, el: unknown) => void): () => void;
 }
 ```
 
@@ -76,7 +76,7 @@ interface Handle<T = number | Vec> {
 </ResponseField>
 
 <ResponseField name="bind(el, apply)" type="() => void">
-  Registers a DOM binding. Loop calls `apply(value, el)` immediately and then again each frame whenever the value changes. Returns an unsubscribe function. Calling `bind` implicitly registers the handle with the RAF runtime so it ticks even without a pipeline.
+  Registers a DOM binding. Loop calls `apply(value, el)` immediately and then again each frame whenever the value changes. The `apply` callback receives both the current value `v` and the bound element `el`. Returns an unsubscribe function. Calling `bind` implicitly registers the handle with the RAF runtime so it ticks even without a pipeline.
 </ResponseField>
 
 ```typescript handle-usage.ts

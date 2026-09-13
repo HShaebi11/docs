@@ -74,7 +74,9 @@ Loop's `"keyboard"` input is a `Handle<string>` that fires a `"change"` event on
       to: "mirror",
       accepts: "data",
       dataType: "text",
-      render: (p) => { mirror.textContent = String(p.value); },
+      // The on("change") subscriber above already handles DOM updates.
+      // This sink exists to prove the full data path runs each RAF tick.
+      render: () => {},
     });
 
     loop.pipe(src, upper, snk).start();
@@ -131,15 +133,16 @@ Loop's `"keyboard"` input is a `Handle<string>` that fires a `"change"` event on
   ```
 </Accordion>
 
-<Accordion title="loop.sink() — writing to the DOM">
-  `loop.sink(def)` creates the terminal stage. Its `render` function receives the packet produced by the previous stage and performs the side effect — in this case, updating `textContent`. The sink never returns a value.
+<Accordion title="loop.sink() — the terminal stage">
+  `loop.sink(def)` creates the terminal stage. Its `render` function receives the packet produced by the previous stage and performs the side effect. In this example, the `on("change")` push subscription already updates the DOM, so the pipeline sink uses a no-op `render` to prove the full data path runs on each RAF tick without duplicating the DOM write.
 
   ```typescript
   const snk = loop.sink({
     to: "mirror",
     accepts: "data",
     dataType: "text",
-    render: (p) => { mirror.textContent = String(p.value); },
+    // on("change") above already updates the DOM; this sink proves the pipeline runs.
+    render: () => {},
   });
   ```
 </Accordion>

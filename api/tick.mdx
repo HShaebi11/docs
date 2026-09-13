@@ -94,9 +94,9 @@ loop.tick(() => {
 });
 ```
 
-## Runtime internals
+## How the runtime loop works
 
-`loop.tick()` delegates to the singleton `Runtime` class. The runtime uses `requestAnimationFrame` in browser environments and falls back to `setTimeout(..., 16)` in environments where `requestAnimationFrame` is not available (such as Node.js tests).
+`loop.tick()` registers your callback with the shared Loop runtime. The runtime drives everything with `requestAnimationFrame` in browser environments and falls back to `setTimeout(..., 16)` in environments where `requestAnimationFrame` is not available (such as Node.js tests).
 
 <Note>
   The runtime starts automatically the first time you call `loop.tick()`, `loop.pipe(...).start()`, or `handle.bind()`. You never need to call a global `loop.start()`.

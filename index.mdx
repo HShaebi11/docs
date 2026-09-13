@@ -45,6 +45,9 @@ Loop follows a simple four-step onboarding flow. Once you complete it, every inp
     ```typescript app.ts
     import loop from "@theinterfaces-lab/loop";
 
+    const keyboard = loop.input("keyboard");
+    const el = document.getElementById("output");
+
     const src = loop.source({
       from: "keyboard",
       emits: "data",
@@ -71,6 +74,7 @@ Loop follows a simple four-step onboarding flow. Once you complete it, every inp
     Use `loop.tick()` to run any per-frame logic — reading handle values, updating positions, or polling state — synchronized to `requestAnimationFrame`.
 
     ```typescript app.ts
+    const el = document.getElementById("square");
     const dpad = loop.input("dpad");
     let x = 0, y = 0;
 

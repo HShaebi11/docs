@@ -1,7 +1,7 @@
 ---
 title: "Loop Transport API: BroadcastChannel, WebSocket, and Memory"
 sidebarTitle: "Transports"
-description: "Reference for Loop's three transport implementations — broadcastTransport for multi-tab, websocketTransport for cross-device, and memoryTransport for testing."
+description: "Reference for Loop's three built-in transports: broadcastTransport for same-tab, websocketTransport for cross-device, and memoryTransport for tests."
 ---
 
 A `Transport` is the object that actually moves packets between peers. Loop ships three implementations: `broadcastTransport` for same-origin multi-tab communication, `websocketTransport` for cross-device or cross-origin communication through a relay server, and `memoryTransport` for synchronous in-process communication during testing. All three satisfy the same `Transport` interface, so you can swap them into `loop.relay.room()` without changing any other code.
@@ -150,15 +150,12 @@ Creates a fully in-process, synchronous transport. All `memoryTransport` instanc
 ```typescript memory-transport.ts
 import loop from "@theinterfaces-lab/loop";
 
-// Both sides get the same underlying MemoryTransport instance
-const senderRelay = loop.relay.room(
-  "test-room",
-  loop.relay.memoryTransport("test-room")
-);
-const receiverRelay = loop.relay.room(
-  "test-room-rx",
-  loop.relay.memoryTransport("test-room")
-);
+// memoryTransport("test-room") is a singleton — both relay rooms share the
+// same underlying transport instance, so packets flow between them in-process.
+const sharedTransport = loop.relay.memoryTransport("test-room");
+
+const senderRelay = loop.relay.room("test-room-tx", sharedTransport);
+const receiverRelay = loop.relay.room("test-room-rx", sharedTransport);
 
 await senderRelay.connect();
 await receiverRelay.connect();

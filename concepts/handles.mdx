@@ -1,7 +1,7 @@
 ---
 title: "Reactive Handles: Read, Subscribe, and Bind Values"
 sidebarTitle: "Handles"
-description: "A Handle gives you reactive access to any continuously changing value in Loop — read it synchronously, subscribe to changes, or bind it directly to a DOM element."
+description: "A Handle gives you reactive access to a continuously changing value in Loop — read it synchronously, subscribe to changes, or bind it to a DOM element."
 ---
 
 When you call `loop.input("keyboard")` or `loop.input("dpad")`, you get back a **Handle** — a typed reactive container that always holds the current value of that input. Handles are the bind-first alternative to pipelines: instead of declaring a source, transform, and sink, you grab a handle and either read from it inside a tick callback, subscribe to changes as they happen, or let Loop update a DOM element for you automatically.
@@ -10,9 +10,9 @@ When you call `loop.input("keyboard")` or `loop.input("dpad")`, you get back a *
 
 ```typescript handle.ts
 interface Handle<T = number | Vec> {
-  readonly value: T;                                              // current value (synchronous read)
-  on(event: "change", fn: (v: T) => void): () => void;          // push subscription
-  bind(el: Element, apply: (v: T) => void): () => void;         // DOM binding
+  readonly value: T;                                                      // current value (synchronous read)
+  on(event: "change", fn: (v: T) => void): () => void;                   // push subscription
+  bind(el: Element, apply: (v: T, el: Element) => void): () => void;     // DOM binding
 }
 ```
 

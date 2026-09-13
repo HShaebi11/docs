@@ -1,10 +1,10 @@
 ---
-title: "Analog Sliders Input: Gamepad Axes and MIDI CC"
+title: "Analog Sliders Input: Gamepad, MIDI CC, and Fallback"
 sidebarTitle: "Sliders"
-description: "The sliders input bundle gives you three normalized 0–1 handles for x, y, and rotation — driven by gamepad left-stick and trigger, MIDI control change messages, or on-screen fallback sliders."
+description: "getSlidersInput() returns a SliderBundle with three 0–1 handles — x, y, and rotation — driven by gamepad axes, MIDI CC, or retained handle values."
 ---
 
-The sliders input bundle provides three continuous analog values — `x`, `y`, and `rotation` — each normalized to the range 0–1. A single call to `loop.getSlidersInput()` returns all three as a `SliderBundle`. Loop automatically polls the best available input source on every animation frame: a connected gamepad takes priority, followed by MIDI CC messages, and finally on-screen `<input type="range">` elements that serve as a built-in fallback when no hardware is present.
+The sliders input bundle provides three continuous analog values — `x`, `y`, and `rotation` — each normalized to the range 0–1. A single call to `loop.getSlidersInput()` returns all three as a `SliderBundle`. Loop automatically polls the best available input source on every animation frame: a connected gamepad takes priority, followed by MIDI CC messages. When neither is active, the handles retain their last written value so on-screen controls you wire up remain effective.
 
 ## The `SliderBundle` type
 
@@ -45,9 +45,6 @@ loop.tick(() => {
   mesh.position.y = (y.value - 0.5) * 10;
   mesh.rotation.z = rotation.value * Math.PI * 2;
 });
-
-// Or bind to on-screen range inputs
-x.bind(xSlider, (v) => { xSlider.value = String(v); });
 ```
 
 ## Input source mappings
@@ -56,7 +53,7 @@ The sliders bundle reads from the following physical sources, in priority order:
 
 ### Gamepad (highest priority)
 
-When a gamepad is connected and any axis or trigger exceeds the deadzone threshold (0.05), the gamepad becomes the active device and keyboard/on-screen sources are bypassed.
+When a gamepad is connected and any axis or trigger exceeds the deadzone threshold (0.05), the gamepad becomes the active device and other sources are bypassed.
 
 | Slider | Gamepad source | Notes |
 |--------|---------------|-------|
@@ -68,9 +65,26 @@ When a gamepad is connected and any axis or trigger exceeds the deadzone thresho
 
 When MIDI CC messages are received, the active device switches to `"midi"`. See the [MIDI page](/inputs/midi) for full details.
 
-### On-screen fallback
+### Fallback (on-screen)
 
-When neither gamepad nor MIDI is active, the bundle uses its own internal handle values as the source. These values are driven by any `<input type="range">` elements you bind to the handles — making on-screen sliders the zero-hardware fallback.
+When neither gamepad nor MIDI is active, the active device is `"on-screen"` and each handle retains its last stored value. You can wire up `<input type="range">` elements as a zero-hardware fallback by listening to their `input` events and calling `handle.on("change", fn)` or by subscribing and keeping your UI in sync.
+
+To display slider values on-screen using `handle.bind()`, provide a callback that writes the handle's current value to the element. `bind()` calls the callback immediately and again whenever the handle value changes:
+
+```typescript fallback.ts
+import loop from "@theinterfaces-lab/loop";
+
+const { x, y, rotation } = loop.getSlidersInput();
+
+const xSlider   = document.getElementById("x-slider")   as HTMLInputElement;
+const ySlider   = document.getElementById("y-slider")   as HTMLInputElement;
+const rotSlider = document.getElementById("rot-slider") as HTMLInputElement;
+
+// Reflect handle values onto on-screen range inputs
+x.bind(xSlider,          (v) => { xSlider.value   = String(Math.round(v * 100)); });
+y.bind(ySlider,          (v) => { ySlider.value   = String(Math.round(v * 100)); });
+rotation.bind(rotSlider, (v) => { rotSlider.value = String(Math.round(v * 100)); });
+```
 
 ## Detecting and overriding the active device
 
@@ -85,30 +99,6 @@ const device = loop.getSlidersActiveDevice();
 
 // Override the active device
 loop.setSlidersActiveDevice("on-screen");
-```
-
-## On-screen fallback sliders
-
-When no gamepad or MIDI device is detected, bind each handle to an `<input type="range">` element. The handle reads back from the element's value on each tick, so the on-screen slider immediately becomes the effective source.
-
-```html index.html
-<input type="range" id="x-slider" min="0" max="100" value="50">
-<input type="range" id="y-slider" min="0" max="100" value="50">
-<input type="range" id="rot-slider" min="0" max="100" value="0">
-```
-
-```typescript fallback.ts
-import loop from "@theinterfaces-lab/loop";
-
-const { x, y, rotation } = loop.getSlidersInput();
-
-const xSlider   = document.getElementById("x-slider")   as HTMLInputElement;
-const ySlider   = document.getElementById("y-slider")   as HTMLInputElement;
-const rotSlider = document.getElementById("rot-slider") as HTMLInputElement;
-
-x.bind(xSlider,   (v) => { xSlider.value   = String(Math.round(v * 100)); });
-y.bind(ySlider,   (v) => { ySlider.value   = String(Math.round(v * 100)); });
-rotation.bind(rotSlider, (v) => { rotSlider.value = String(Math.round(v * 100)); });
 ```
 
 ## Using sliders in a pipeline

@@ -1,27 +1,27 @@
 ---
-title: "Run the Loop WebSocket Relay Server"
+title: "Loop Relay Server: WebSocket Broker for Cross-Device Play"
 sidebarTitle: "Relay Server"
-description: "Loop includes a minimal Node.js WebSocket relay server. Run it locally or deploy it to any host to enable cross-device communication between controllers and displays."
+description: "Loop provides a minimal Node.js WebSocket relay server script. Run it locally or deploy it to any Node.js host to enable real cross-device communication."
 ---
 
-Loop ships a lightweight Node.js WebSocket relay server at `scripts/relay-server.mjs`. The server acts as a pure message broker: when a peer sends a packet to a room, the server immediately forwards that packet to every other peer connected to the same room. It never stores state, never inspects packet contents, and never buffers history — it only keeps a live set of open sockets per room. Each room is identified by the URL path the client connects to.
+Loop provides a lightweight Node.js WebSocket relay server at `scripts/relay-server.mjs` in the [Loop source repository](https://github.com/interfaces-technology/loop). The script is not bundled in the published npm package, so copy it into your own project to use it. The server acts as a pure message broker: when a peer sends a packet to a room, the server immediately forwards that packet to every other peer connected to the same room. It never stores state, never inspects packet contents, and never buffers history. Each room is identified by the URL path the client connects to.
 
 ## Starting the server
 
 <Steps>
-  <Step title="Install dependencies">
-    The relay server depends only on the `ws` package, which ships with Loop's development dependencies. Install from the root of the Loop repository:
+  <Step title="Get the server script">
+    Copy `scripts/relay-server.mjs` from the Loop source repository into your project directory, then install its only runtime dependency:
 
     ```bash terminal
-    npm install
+    npm install ws
     ```
   </Step>
 
   <Step title="Start the server">
-    Run the `relay` script from `package.json`:
+    Run the script directly with Node.js:
 
     ```bash terminal
-    npm run relay
+    node relay-server.mjs
     # Loop relay listening on ws://0.0.0.0:8787/ROOM_CODE
     ```
 
@@ -43,7 +43,7 @@ Loop ships a lightweight Node.js WebSocket relay server at `scripts/relay-server
 Pass a port number as the first command-line argument to override the default:
 
 ```bash terminal
-node scripts/relay-server.mjs 9000
+node relay-server.mjs 9000
 # Loop relay listening on ws://0.0.0.0:9000/ROOM_CODE
 ```
 
@@ -141,7 +141,7 @@ loop.tick(() => {
 ## Deploying to production
 
 <Tip>
-  For production cross-device use, deploy `scripts/relay-server.mjs` to any Node.js host — a VPS, a container, or a platform like Railway or Fly.io. The server has no external dependencies beyond the `ws` package, so a minimal Node.js image is sufficient.
+  For production cross-device use, deploy `relay-server.mjs` to any Node.js host — a VPS, a container, or a platform like Railway or Fly.io. The server has no runtime dependencies beyond the `ws` package, so a minimal Node.js image is sufficient.
 </Tip>
 
 When deploying behind a reverse proxy (nginx, Caddy, a cloud load balancer), make sure the proxy is configured to forward WebSocket upgrade requests. Most platforms handle this automatically when the connection uses the `ws://` or `wss://` scheme.

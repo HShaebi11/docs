@@ -1,7 +1,7 @@
 ---
-title: "Directional Input with the Loop D-pad Source"
+title: "Directional Input with the Loop D-pad Input Source"
 sidebarTitle: "D-pad"
-description: "The D-pad input source captures directional movement from keyboard arrow keys, WASD, or a gamepad D-pad, returning a Handle<Vec> with x and y axes normalized to −1–1."
+description: "Loop's D-pad input reads arrow keys, WASD, or a gamepad D-pad, returning a Handle<Vec> with x and y axes each normalized to −1 to 1."
 ---
 
 The D-pad input source gives you a two-axis directional vector that works across keyboard and gamepad without any configuration. Arrow keys and WASD map to the four cardinal directions; a connected gamepad's D-pad buttons (12–15) do the same. When both devices are active simultaneously, the gamepad always takes priority. The resulting `Handle<Vec>` is sampled on every animation frame so your tick loop always sees the freshest value.
@@ -112,4 +112,4 @@ const dpadSource = loop.source({
 
 ## How it works
 
-The D-pad source attaches `keydown` and `keyup` listeners to `document` and maintains a `Set` of currently pressed keys. On every RAF tick, an internal sampler function polls both the keyboard state and the Gamepad API (`navigator.getGamepads()`), combines them according to priority rules, and writes the result into the handle via `_setValue`. The `normalizeVec` utility clamps each axis to −1–1 before the value is stored.
+The D-pad source attaches `keydown` and `keyup` listeners to `document` and maintains a set of currently pressed keys. On every RAF tick, an internal sampler polls both the keyboard state and the Gamepad API (`navigator.getGamepads()`), combines them according to priority rules, and updates the handle. Each axis is clamped to −1–1 before the value is stored.

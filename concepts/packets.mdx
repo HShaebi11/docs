@@ -1,7 +1,7 @@
 ---
 title: "The Loop Wire Contract: Packets, Kinds, and Values"
 sidebarTitle: "Packets"
-description: "Loop's wire contract defines three packet kinds — value, frame, and data — that every component on the pipeline speaks. Learn how packets flow and what each kind carries."
+description: "Loop's wire contract defines three packet kinds — value, frame, and data — that every stage speaks. Learn how packets flow and what each kind carries."
 ---
 
 Every signal that moves through a Loop pipeline is a **packet** — a plain TypeScript object with a `kind` discriminant that tells every stage on the wire what shape to expect. The wire contract is intentionally narrow: there are exactly three kinds, and nothing else is allowed to cross. This constraint is what lets `loop.pipe()` validate adjacent stages at wiring time before your code ever runs.

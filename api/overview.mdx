@@ -66,11 +66,11 @@ import loop from "@theinterfaces-lab/loop";
 | Function | Returns | Purpose |
 |---|---|---|
 | `loop.relay.room(code, transport?)` | `RelayRoom` | Open or retrieve a relay room by code |
-| `loop.relay.broadcastTransport(code)` | `Transport` | BroadcastChannel transport (same-origin tabs) |
-| `loop.relay.websocketTransport(url)` | `Transport` | WebSocket transport for cross-device relay |
-| `loop.relay.memoryTransport()` | `Transport` | In-memory transport for testing |
+| `loop.relay.broadcastTransport(room)` | `Transport` | BroadcastChannel transport (same-origin tabs) |
+| `loop.relay.websocketTransport(url, room)` | `Transport` | WebSocket transport for cross-device relay |
+| `loop.relay.memoryTransport(room)` | `Transport` | In-memory transport for testing |
 | `loop.relay.clear()` | `void` | Disconnect and remove all relay rooms |
 
 <Note>
-  `loop.layout`, `loop.filter`, and `loop.capture` are stubs reserved for future releases. Calling any of them throws `"not implemented"` immediately. Do not call them in production code.
+  `loop.layout`, `loop.filter`, and `loop.capture` are stubs reserved for future releases. Calling any of them throws an error immediately — they are not yet implemented. Do not call them in production code.
 </Note>
